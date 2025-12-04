@@ -1,0 +1,3 @@
+# Ignore test environment files with tokens and credentials
+.env.test
+*.env

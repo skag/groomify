@@ -190,6 +190,18 @@ export function AppointmentsCalendar({
     return false
   }
 
+  // Find the next appointment start time after a given time for a groomer on a date
+  // Returns the start time in minutes, or null if no appointment after
+  const getNextAppointmentStart = (groomerId: number, dateStr: string, afterMinutes: number): number | null => {
+    const groomerAppointments = appointments
+      .filter(a => a.groomerId === groomerId && a.date === dateStr)
+      .map(a => parseTimeToMinutes(a.time))
+      .filter(startMinutes => startMinutes > afterMinutes)
+      .sort((a, b) => a - b)
+
+    return groomerAppointments.length > 0 ? groomerAppointments[0] : null
+  }
+
   const handleAppointmentClick = (appointment: Appointment, overlappingAppts: Appointment[]) => {
     // If there are overlapping appointments
     if (overlappingAppts.length > 0) {
@@ -307,9 +319,24 @@ export function AppointmentsCalendar({
     let finalEndMinutes: number
 
     if (!isDragging) {
-      // Simple click - create 1 hour slot
+      // Simple click - create slot up to 1 hour, but limited by next appointment
       finalStartMinutes = dragStart.minutes
-      finalEndMinutes = dragStart.minutes + 60
+      const nextAptStart = getNextAppointmentStart(dragStart.groomerId, dragStart.dateStr, dragStart.minutes)
+
+      if (nextAptStart !== null && nextAptStart < dragStart.minutes + 60) {
+        // Next appointment starts before 1 hour, so end at next appointment
+        finalEndMinutes = nextAptStart
+      } else {
+        // No appointment within the hour, create full 1 hour slot
+        finalEndMinutes = dragStart.minutes + 60
+      }
+
+      // Ensure minimum 15 minutes
+      if (finalEndMinutes - finalStartMinutes < 15) {
+        setDragStart(null)
+        setIsDragging(false)
+        return
+      }
     } else if (selection) {
       // Drag complete - use selection
       finalStartMinutes = selection.startMinutes
@@ -346,7 +373,7 @@ export function AppointmentsCalendar({
 
     setDragStart(null)
     setIsDragging(false)
-  }, [dragStart, isDragging, selection])
+  }, [dragStart, isDragging, selection, appointments])
 
   // Add/remove global mouse event listeners
   React.useEffect(() => {
@@ -599,8 +626,23 @@ export function AppointmentsCalendar({
                             calDate.isToday ? "bg-primary/5" : "bg-gray-50"
                           )}
                           onMouseDown={(e) => {
-                            if (appointmentsInSlot.length === 0) {
-                              handleSlotMouseDown(e, groomer.id, groomer.name, calDate, timeSlot, occupied)
+                            // Allow clicking if slot is empty OR if clicking before the first appointment in slot
+                            const slotMinutes = parseTimeToMinutes(timeSlot)
+                            const rect = e.currentTarget.getBoundingClientRect()
+                            const relativeY = e.clientY - rect.top
+                            const minutesIntoSlot = Math.round((relativeY / 100) * 60 / 15) * 15
+                            const clickedMinutes = slotMinutes + minutesIntoSlot
+
+                            // Check if there's an appointment at the clicked position
+                            const hasAppointmentAtClick = appointments.some(apt => {
+                              if (apt.groomerId !== groomer.id || apt.date !== calDate.dateStr) return false
+                              const aptStart = parseTimeToMinutes(apt.time)
+                              const aptEnd = parseTimeToMinutes(apt.endTime)
+                              return clickedMinutes >= aptStart && clickedMinutes < aptEnd
+                            })
+
+                            if (!hasAppointmentAtClick && !occupied) {
+                              handleSlotMouseDown(e, groomer.id, groomer.name, calDate, timeSlot, false)
                             }
                           }}
                         >

@@ -1,7 +1,10 @@
-import React, { useRef } from "react"
+import React, { useRef, useState, useCallback } from "react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverAnchor } from "@/components/ui/popover"
 import { AppointmentCard, AppointmentStatus } from "@/components/AppointmentCard"
 import { cn } from "@/lib/utils"
+import { Calendar, Clock, X } from "lucide-react"
 
 export interface Appointment {
   id: number
@@ -29,13 +32,25 @@ export interface CalendarGroomer {
   name: string
 }
 
+// Selection state for the slot being created
+interface SlotSelection {
+  groomerId: number
+  groomerName: string
+  date: Date
+  dateStr: string
+  startMinutes: number
+  endMinutes: number
+  // Position for the popover anchor
+  anchorRect: { top: number; left: number; width: number; height: number }
+}
+
 interface AppointmentsCalendarProps {
   appointments: Appointment[]
   groomers: CalendarGroomer[]
   dates: CalendarDate[]
   viewMode?: 'day' | 'week'
   onAppointmentClick?: (appointment: Appointment) => void
-  onSlotClick?: (groomerId: number, groomerName: string, date: Date, timeSlot: string) => void
+  onSlotSelect?: (groomerId: number, groomerName: string, date: Date, startTime: string, endTime: string) => void
 }
 
 export function AppointmentsCalendar({
@@ -44,12 +59,18 @@ export function AppointmentsCalendar({
   dates,
   viewMode = 'day',
   onAppointmentClick,
-  onSlotClick
+  onSlotSelect
 }: AppointmentsCalendarProps) {
-  const [activeAppointmentId, setActiveAppointmentId] = React.useState<number | null>(null)
+  const [activeAppointmentId, setActiveAppointmentId] = useState<number | null>(null)
+  const [selection, setSelection] = useState<SlotSelection | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const [dragStart, setDragStart] = useState<{ groomerId: number; groomerName: string; date: Date; dateStr: string; minutes: number; y: number } | null>(null)
+  const [popoverOpen, setPopoverOpen] = useState(false)
+
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const timeColumnRef = useRef<HTMLDivElement>(null)
   const headerScrollRef = useRef<HTMLDivElement>(null)
+  const calendarBodyRef = useRef<HTMLDivElement>(null)
 
   // Sync scroll between time column (vertical) and header (horizontal)
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -79,7 +100,16 @@ export function AppointmentsCalendar({
     return hours * 60 + minutes
   }
 
-  // Helper to format hour (in 24h) to time string
+  // Helper to format minutes to time string (e.g., "9:00 AM")
+  const formatMinutesToTimeString = (totalMinutes: number): string => {
+    const hours24 = Math.floor(totalMinutes / 60)
+    const minutes = totalMinutes % 60
+    const period = hours24 >= 12 ? 'PM' : 'AM'
+    const hours12 = hours24 === 0 ? 12 : hours24 > 12 ? hours24 - 12 : hours24
+    return `${hours12}:${minutes.toString().padStart(2, '0')} ${period}`
+  }
+
+  // Helper to format hour (in 24h) to time string for display
   const formatHourToTimeString = (hour: number): string => {
     const period = hour >= 12 ? 'PM' : 'AM'
     const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour
@@ -112,6 +142,7 @@ export function AppointmentsCalendar({
   }
 
   const timeSlots = getTimeSlots()
+  const startHour = 8 // First hour shown in calendar
 
   // Helper to get all appointments that start within this time slot hour for a specific groomer and date
   const getAppointmentsAtSlot = (groomerId: number, dateStr: string, timeSlot: string) => {
@@ -181,6 +212,174 @@ export function AppointmentsCalendar({
     return appointments.filter(apt => apt.groomerId === groomerId && apt.date === dateStr).length
   }
 
+  // Calculate minutes from Y position within the calendar body
+  const getMinutesFromY = useCallback((y: number, slotElement: HTMLElement): number => {
+    const rect = slotElement.getBoundingClientRect()
+    const relativeY = y - rect.top
+    const slotIndex = Math.floor(relativeY / 100) // Each slot is 100px
+    const minutesIntoSlot = Math.round(((relativeY % 100) / 100) * 60 / 15) * 15 // Snap to 15-min intervals
+    return (startHour + slotIndex) * 60 + minutesIntoSlot
+  }, [startHour])
+
+  // Handle mouse down on a slot cell
+  const handleSlotMouseDown = (
+    e: React.MouseEvent<HTMLDivElement>,
+    groomerId: number,
+    groomerName: string,
+    calDate: CalendarDate,
+    timeSlot: string,
+    occupied: boolean
+  ) => {
+    if (occupied) return
+
+    // Close any existing popover
+    setPopoverOpen(false)
+    setSelection(null)
+
+    const slotMinutes = parseTimeToMinutes(timeSlot)
+    const rect = e.currentTarget.getBoundingClientRect()
+    const relativeY = e.clientY - rect.top
+    // Snap to 15-minute intervals within the slot
+    const minutesIntoSlot = Math.round((relativeY / 100) * 60 / 15) * 15
+    const clickedMinutes = slotMinutes + minutesIntoSlot
+
+    setDragStart({
+      groomerId,
+      groomerName,
+      date: calDate.date,
+      dateStr: calDate.dateStr,
+      minutes: clickedMinutes,
+      y: e.clientY
+    })
+    setIsDragging(false)
+  }
+
+  // Handle mouse move during drag
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!dragStart) return
+
+    // Determine if we're actually dragging (moved more than 5px)
+    if (Math.abs(e.clientY - dragStart.y) > 5) {
+      setIsDragging(true)
+    }
+
+    if (!isDragging && Math.abs(e.clientY - dragStart.y) <= 5) return
+
+    // Find the slot element under the mouse
+    const elements = document.elementsFromPoint(e.clientX, e.clientY)
+    const slotElement = elements.find(el => el.getAttribute('data-slot-key'))
+
+    if (slotElement) {
+      const slotKey = slotElement.getAttribute('data-slot-key')
+      if (slotKey) {
+        const [dateStr, gId] = slotKey.split('-groomer-')
+        if (dateStr === dragStart.dateStr && parseInt(gId) === dragStart.groomerId) {
+          const rect = slotElement.getBoundingClientRect()
+          const relativeY = e.clientY - rect.top
+          const slotTimeStr = slotElement.getAttribute('data-time-slot') || ''
+          const slotMinutes = parseTimeToMinutes(slotTimeStr)
+          const minutesIntoSlot = Math.round((relativeY / 100) * 60 / 15) * 15
+          const currentMinutes = slotMinutes + Math.min(minutesIntoSlot, 60)
+
+          const startMinutes = Math.min(dragStart.minutes, currentMinutes)
+          const endMinutes = Math.max(dragStart.minutes, currentMinutes)
+
+          // Create temporary selection for visual feedback
+          setSelection({
+            groomerId: dragStart.groomerId,
+            groomerName: dragStart.groomerName,
+            date: dragStart.date,
+            dateStr: dragStart.dateStr,
+            startMinutes,
+            endMinutes: Math.max(endMinutes, startMinutes + 15), // Minimum 15 minutes
+            anchorRect: { top: 0, left: 0, width: 0, height: 0 }
+          })
+        }
+      }
+    }
+  }, [dragStart, isDragging])
+
+  // Handle mouse up - finalize selection
+  const handleMouseUp = useCallback((e: MouseEvent) => {
+    if (!dragStart) return
+
+    let finalStartMinutes: number
+    let finalEndMinutes: number
+
+    if (!isDragging) {
+      // Simple click - create 1 hour slot
+      finalStartMinutes = dragStart.minutes
+      finalEndMinutes = dragStart.minutes + 60
+    } else if (selection) {
+      // Drag complete - use selection
+      finalStartMinutes = selection.startMinutes
+      finalEndMinutes = selection.endMinutes
+    } else {
+      setDragStart(null)
+      setIsDragging(false)
+      return
+    }
+
+    // Find the element to anchor the popover
+    const elements = document.elementsFromPoint(e.clientX, e.clientY)
+    const slotElement = elements.find(el => el.getAttribute('data-slot-key'))
+
+    if (slotElement) {
+      const rect = slotElement.getBoundingClientRect()
+
+      setSelection({
+        groomerId: dragStart.groomerId,
+        groomerName: dragStart.groomerName,
+        date: dragStart.date,
+        dateStr: dragStart.dateStr,
+        startMinutes: finalStartMinutes,
+        endMinutes: finalEndMinutes,
+        anchorRect: {
+          top: rect.top,
+          left: rect.left,
+          width: rect.width,
+          height: rect.height
+        }
+      })
+      setPopoverOpen(true)
+    }
+
+    setDragStart(null)
+    setIsDragging(false)
+  }, [dragStart, isDragging, selection])
+
+  // Add/remove global mouse event listeners
+  React.useEffect(() => {
+    if (dragStart) {
+      window.addEventListener('mousemove', handleMouseMove)
+      window.addEventListener('mouseup', handleMouseUp)
+      return () => {
+        window.removeEventListener('mousemove', handleMouseMove)
+        window.removeEventListener('mouseup', handleMouseUp)
+      }
+    }
+  }, [dragStart, handleMouseMove, handleMouseUp])
+
+  // Close popover and clear selection
+  const handleClosePopover = () => {
+    setPopoverOpen(false)
+    setSelection(null)
+  }
+
+  // Handle booking confirmation
+  const handleConfirmBooking = () => {
+    if (selection && onSlotSelect) {
+      onSlotSelect(
+        selection.groomerId,
+        selection.groomerName,
+        selection.date,
+        formatMinutesToTimeString(selection.startMinutes),
+        formatMinutesToTimeString(selection.endMinutes)
+      )
+    }
+    handleClosePopover()
+  }
+
   const totalColumns = dates.length * groomers.length
   const columnWidth = 150
   const minColumnWidth = 150
@@ -190,8 +389,84 @@ export function AppointmentsCalendar({
   // In week view, columns have fixed width for horizontal scrolling
   const isDayView = viewMode === 'day'
 
+  // Calculate selection overlay position for a groomer column
+  // Returns position relative to the first slot (8 AM = startHour)
+  const getSelectionOverlayForColumn = (groomerId: number, dateStr: string) => {
+    if (!selection || selection.groomerId !== groomerId || selection.dateStr !== dateStr) return null
+
+    // Calculate top position: pixels from start of calendar body
+    // Each hour slot is 100px, starting from startHour (8 AM = 480 minutes)
+    const startHourMinutes = startHour * 60
+    const topOffset = ((selection.startMinutes - startHourMinutes) / 60) * 100
+    const height = ((selection.endMinutes - selection.startMinutes) / 60) * 100
+
+    return { topOffset, height }
+  }
+
   return (
-    <div className="border rounded-lg h-full flex flex-col overflow-hidden">
+    <div className="border rounded-lg h-full flex flex-col overflow-hidden relative">
+      {/* Popover for slot selection */}
+      <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+        <PopoverAnchor
+          style={{
+            position: 'fixed',
+            top: selection?.anchorRect.top ?? 0,
+            left: selection?.anchorRect.left ?? 0,
+            width: selection?.anchorRect.width ?? 0,
+            height: selection?.anchorRect.height ?? 0,
+            pointerEvents: 'none'
+          }}
+        />
+        <PopoverContent
+          side="right"
+          align="start"
+          className="w-72 p-0"
+          onInteractOutside={handleClosePopover}
+        >
+          <div className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="font-semibold text-sm">Ready to Book</h4>
+              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleClosePopover}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {selection && (
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Calendar className="h-4 w-4" />
+                  <span>
+                    {selection.date.toLocaleDateString('en-US', {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric'
+                    })}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Clock className="h-4 w-4" />
+                  <span>
+                    {formatMinutesToTimeString(selection.startMinutes)} - {formatMinutesToTimeString(selection.endMinutes)}
+                  </span>
+                </div>
+                <div className="text-muted-foreground">
+                  <span className="font-medium text-foreground">{selection.groomerName}</span>
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-2 mt-4">
+              <Button variant="outline" size="sm" className="flex-1" onClick={handleClosePopover}>
+                Cancel
+              </Button>
+              <Button size="sm" className="flex-1" onClick={handleConfirmBooking}>
+                Book
+              </Button>
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
+
       {/* Header area with fixed time column */}
       <div className="flex shrink-0">
         {/* Fixed time column header */}
@@ -283,104 +558,127 @@ export function AppointmentsCalendar({
           className={cn("flex-1", isDayView ? "overflow-y-auto overflow-x-hidden" : "overflow-auto")}
           onScroll={handleScroll}
         >
-          <div style={isDayView ? undefined : { width: totalColumns * columnWidth }}>
-            {timeSlots.map((timeSlot, timeIndex) => (
-              <div key={timeIndex} className="flex border-b last:border-b-0 h-[100px]">
-                {dates.map((calDate) =>
-                  groomers.map((groomer) => {
-                    const appointmentsInSlot = getAppointmentsAtSlot(groomer.id, calDate.dateStr, timeSlot)
-                    const occupied = appointmentsInSlot.length === 0 && isSlotOccupied(groomer.id, calDate.dateStr, timeSlot)
+          {/* Column-based layout: render each groomer column with all time slots */}
+          <div ref={calendarBodyRef} className="flex" style={isDayView ? undefined : { width: totalColumns * columnWidth }}>
+            {dates.map((calDate) =>
+              groomers.map((groomer) => {
+                const selectionOverlay = getSelectionOverlayForColumn(groomer.id, calDate.dateStr)
 
-                    return (
+                return (
+                  <div
+                    key={`${calDate.dateStr}-${groomer.id}`}
+                    className={cn(
+                      "relative border-r last:border-r-0",
+                      isDayView && "flex-1"
+                    )}
+                    style={isDayView ? { minWidth: minColumnWidth } : { width: columnWidth }}
+                  >
+                    {/* Single selection overlay for the entire column */}
+                    {selectionOverlay && (
                       <div
-                        key={`${calDate.dateStr}-${groomer.id}-${timeSlot}`}
-                        className={cn(
-                          "border-r last:border-r-0 p-2 relative cursor-pointer hover:bg-gray-100 transition-colors",
-                          calDate.isToday ? "bg-primary/5" : "bg-gray-50",
-                          isDayView && "flex-1"
-                        )}
-                        style={isDayView ? { minWidth: minColumnWidth } : { width: columnWidth }}
-                        onClick={() => {
-                          // Only create new appointment if slot is not occupied
-                          if (appointmentsInSlot.length === 0 && !occupied && onSlotClick) {
-                            onSlotClick(groomer.id, groomer.name, calDate.date, timeSlot)
-                          }
+                        className="absolute left-1 right-1 bg-primary/20 border-2 border-primary border-dashed rounded-md z-10 pointer-events-none"
+                        style={{
+                          top: `${selectionOverlay.topOffset}px`,
+                          height: `${selectionOverlay.height}px`
                         }}
-                      >
-                        {appointmentsInSlot.length > 0 ? (
-                          appointmentsInSlot.map((appointment) => {
-                            const slotMinutes = parseTimeToMinutes(timeSlot)
-                            const aptStartMinutes = parseTimeToMinutes(appointment.time)
-                            const aptEndMinutes = parseTimeToMinutes(appointment.endTime)
+                      />
+                    )}
 
-                            // Calculate offset from top of slot (in pixels)
-                            const minutesFromSlotStart = aptStartMinutes - slotMinutes
-                            const topOffset = (minutesFromSlotStart / 60) * 100 // 100px per hour
+                    {/* Render time slots within this column */}
+                    {timeSlots.map((timeSlot, timeIndex) => {
+                      const appointmentsInSlot = getAppointmentsAtSlot(groomer.id, calDate.dateStr, timeSlot)
+                      const occupied = appointmentsInSlot.length === 0 && isSlotOccupied(groomer.id, calDate.dateStr, timeSlot)
 
-                            // Calculate total height based on actual duration
-                            const durationMinutes = aptEndMinutes - aptStartMinutes
-                            const heightPx = (durationMinutes / 60) * 100
+                      return (
+                        <div
+                          key={`${calDate.dateStr}-${groomer.id}-${timeSlot}`}
+                          data-slot-key={`${calDate.dateStr}-groomer-${groomer.id}`}
+                          data-time-slot={timeSlot}
+                          className={cn(
+                            "border-b last:border-b-0 h-[100px] relative cursor-pointer hover:bg-gray-100 transition-colors select-none",
+                            calDate.isToday ? "bg-primary/5" : "bg-gray-50"
+                          )}
+                          onMouseDown={(e) => {
+                            if (appointmentsInSlot.length === 0) {
+                              handleSlotMouseDown(e, groomer.id, groomer.name, calDate, timeSlot, occupied)
+                            }
+                          }}
+                        >
+                          {appointmentsInSlot.length > 0 ? (
+                            appointmentsInSlot.map((appointment) => {
+                              const slotMinutes = parseTimeToMinutes(timeSlot)
+                              const aptStartMinutes = parseTimeToMinutes(appointment.time)
+                              const aptEndMinutes = parseTimeToMinutes(appointment.endTime)
 
-                            // Account for borders between slots
-                            const slotsSpanned = Math.ceil((aptStartMinutes - slotMinutes + durationMinutes) / 60)
-                            const borderAdjustment = (slotsSpanned - 1) * 1 // 1px border between slots
+                              // Calculate offset from top of slot (in pixels)
+                              const minutesFromSlotStart = aptStartMinutes - slotMinutes
+                              const topOffset = (minutesFromSlotStart / 60) * 100 // 100px per hour
 
-                            // Check for overlaps with ALL appointments, not just ones in this slot
-                            const overlappingAppts = getOverlappingAppointments(groomer.id, calDate.dateStr, appointment)
-                            // Find the index of this appointment among all overlapping appointments
-                            const allOverlapping = [appointment, ...overlappingAppts].sort((a, b) =>
-                              parseTimeToMinutes(a.time) - parseTimeToMinutes(b.time)
-                            )
-                            const overlapIndex = allOverlapping.findIndex(apt => apt.id === appointment.id)
+                              // Calculate total height based on actual duration
+                              const durationMinutes = aptEndMinutes - aptStartMinutes
+                              const heightPx = (durationMinutes / 60) * 100
 
-                            // Layering effect for overlapping appointments
-                            const isOverlapping = overlappingAppts.length > 0
-                            const isActive = activeAppointmentId === appointment.id
-                            // If active, bring to front with highest z-index
-                            const zIndex = isActive ? 50 : 20 + overlapIndex
-                            // Calculate left position - active cards have no extra offset beyond base padding
-                            const baseLeftPadding = 4
-                            const stackOffset = isOverlapping && overlapIndex > 0 ? 12 : 0
-                            const leftPosition = isActive ? baseLeftPadding : baseLeftPadding + stackOffset
+                              // Account for borders between slots
+                              const slotsSpanned = Math.ceil((aptStartMinutes - slotMinutes + durationMinutes) / 60)
+                              const borderAdjustment = (slotsSpanned - 1) * 1 // 1px border between slots
 
-                            return (
-                              <AppointmentCard
-                                key={appointment.id}
-                                petName={appointment.petName}
-                                owner={appointment.owner}
-                                service={appointment.service}
-                                time={appointment.time}
-                                endTime={appointment.endTime}
-                                tags={appointment.tags}
-                                status={appointment.status}
-                                onClick={(e) => {
-                                  e?.stopPropagation() // Prevent slot click when clicking appointment
-                                  handleAppointmentClick(appointment, overlappingAppts)
-                                }}
-                                className="absolute"
-                                style={{
-                                  top: `${topOffset}px`,
-                                  left: `${leftPosition}px`,
-                                  right: '4px',
-                                  height: `${heightPx + borderAdjustment}px`,
-                                  zIndex: zIndex
-                                }}
-                              />
-                            )
-                          })
-                        ) : occupied ? (
-                          // This slot is occupied by a continuing appointment, render nothing
-                          <div className="h-full"></div>
-                        ) : (
-                          // Empty slot - clickable
-                          <div className="h-full"></div>
-                        )}
-                      </div>
-                    )
-                  })
-                )}
-              </div>
-            ))}
+                              // Check for overlaps with ALL appointments, not just ones in this slot
+                              const overlappingAppts = getOverlappingAppointments(groomer.id, calDate.dateStr, appointment)
+                              // Find the index of this appointment among all overlapping appointments
+                              const allOverlapping = [appointment, ...overlappingAppts].sort((a, b) =>
+                                parseTimeToMinutes(a.time) - parseTimeToMinutes(b.time)
+                              )
+                              const overlapIndex = allOverlapping.findIndex(apt => apt.id === appointment.id)
+
+                              // Layering effect for overlapping appointments
+                              const isOverlapping = overlappingAppts.length > 0
+                              const isActive = activeAppointmentId === appointment.id
+                              // If active, bring to front with highest z-index
+                              const zIndex = isActive ? 50 : 20 + overlapIndex
+                              // Calculate left position - active cards have no extra offset beyond base padding
+                              const baseLeftPadding = 4
+                              const stackOffset = isOverlapping && overlapIndex > 0 ? 12 : 0
+                              const leftPosition = isActive ? baseLeftPadding : baseLeftPadding + stackOffset
+
+                              return (
+                                <AppointmentCard
+                                  key={appointment.id}
+                                  petName={appointment.petName}
+                                  owner={appointment.owner}
+                                  service={appointment.service}
+                                  time={appointment.time}
+                                  endTime={appointment.endTime}
+                                  tags={appointment.tags}
+                                  status={appointment.status}
+                                  onClick={(e) => {
+                                    e?.stopPropagation() // Prevent slot click when clicking appointment
+                                    handleAppointmentClick(appointment, overlappingAppts)
+                                  }}
+                                  className="absolute"
+                                  style={{
+                                    top: `${topOffset}px`,
+                                    left: `${leftPosition}px`,
+                                    right: '4px',
+                                    height: `${heightPx + borderAdjustment}px`,
+                                    zIndex: zIndex
+                                  }}
+                                />
+                              )
+                            })
+                          ) : occupied ? (
+                            // This slot is occupied by a continuing appointment, render nothing
+                            <div className="h-full"></div>
+                          ) : (
+                            // Empty slot - clickable
+                            <div className="h-full"></div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })
+            )}
           </div>
         </div>
       </div>

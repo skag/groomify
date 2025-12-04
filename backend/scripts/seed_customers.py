@@ -46,6 +46,11 @@ def get_random_pet_name() -> str:
     return fake.first_name()
 
 
+def generate_phone_number() -> str:
+    """Return a simple 10-digit phone number without formatting."""
+    return fake.numerify("##########")
+
+
 def create_pet(db: Session, customer_id: int, business_id: int) -> Pet:
     """Create a single pet with random data."""
     pet = Pet(
@@ -76,7 +81,7 @@ def create_customer_user(
         email=fake.unique.email(),
         first_name=first_name,
         last_name=last_name,
-        phone=fake.phone_number()[:20],  # Limit to 20 chars
+        phone=generate_phone_number(),
         is_primary_contact=is_primary,
         notes=[],
     )

@@ -329,11 +329,11 @@ export default function Appointments() {
     alert(`Clicked on ${appointment.petName} - ${appointment.service}`)
   }
 
-  const handleSlotClick = (_groomerId: number, groomerName: string, date: Date, timeSlot: string) => {
+  const handleSlotSelect = (_groomerId: number, groomerName: string, date: Date, startTime: string, endTime: string) => {
     if (!selectedPet) return
     const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     // TODO: Open booking modal or navigate to booking form
-    alert(`Book ${selectedPet.name} with ${groomerName} on ${dateStr} at ${timeSlot}`)
+    alert(`Book ${selectedPet.name} with ${groomerName} on ${dateStr} from ${startTime} to ${endTime}`)
   }
 
   if (isLoadingPet) {
@@ -574,7 +574,7 @@ export default function Appointments() {
                 dates={calendarDates}
                 viewMode={viewMode}
                 onAppointmentClick={handleAppointmentClick}
-                onSlotClick={selectedPet ? handleSlotClick : undefined}
+                onSlotSelect={selectedPet ? handleSlotSelect : undefined}
               />
             )}
           </div>

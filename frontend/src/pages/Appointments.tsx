@@ -572,6 +572,7 @@ export default function Appointments() {
                 appointments={filteredAppointments}
                 groomers={filteredGroomers}
                 dates={calendarDates}
+                viewMode={viewMode}
                 onAppointmentClick={handleAppointmentClick}
                 onSlotClick={selectedPet ? handleSlotClick : undefined}
               />

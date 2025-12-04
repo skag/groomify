@@ -1,7 +1,8 @@
 import { Clock, Dog } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
-export type AppointmentStatus = "scheduled" | "confirmed" | "in_progress" | "completed" | "cancelled" | "no_show"
+// Status is a string that comes from the database - no fixed enum
+export type AppointmentStatus = string
 
 interface AppointmentCardProps {
   petName: string
@@ -30,27 +31,30 @@ const getTagColor = (tag: string) => {
 }
 
 const getStatusColor = (status: AppointmentStatus): string => {
-  const colors: Record<AppointmentStatus, string> = {
+  const colors: Record<string, string> = {
     'scheduled': 'bg-gray-100 text-gray-800 border-gray-300',
-    'confirmed': 'bg-blue-100 text-blue-800 border-blue-300',
+    'checked_in': 'bg-blue-100 text-blue-800 border-blue-300',
     'in_progress': 'bg-yellow-100 text-yellow-800 border-yellow-300',
-    'completed': 'bg-green-100 text-green-800 border-green-300',
+    'ready_for_pickup': 'bg-green-100 text-green-800 border-green-300',
+    'completed': 'bg-emerald-100 text-emerald-800 border-emerald-300',
     'cancelled': 'bg-red-100 text-red-800 border-red-300',
     'no_show': 'bg-slate-100 text-slate-800 border-slate-300'
   }
-  return colors[status]
+  return colors[status] || 'bg-gray-100 text-gray-800 border-gray-300'
 }
 
 const getStatusLabel = (status: AppointmentStatus): string => {
-  const labels: Record<AppointmentStatus, string> = {
+  const labels: Record<string, string> = {
     'scheduled': 'Scheduled',
-    'confirmed': 'Confirmed',
+    'checked_in': 'Checked In',
     'in_progress': 'In Progress',
-    'completed': 'Completed',
+    'ready_for_pickup': 'Ready for Pickup',
+    'completed': 'Done',
     'cancelled': 'Cancelled',
     'no_show': 'No Show'
   }
-  return labels[status]
+  // Return mapped label or format the status name as fallback
+  return labels[status] || status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
 export function AppointmentCard({

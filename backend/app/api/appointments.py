@@ -14,9 +14,12 @@ from app.schemas.appointment import (
     UpdateAppointmentRequest,
     UpdateAppointmentResponse,
     AppointmentServiceSchema,
+    AppointmentStatusResponse,
 )
+from app.models.appointment import AppointmentStatus
 from app.services.appointment_service import (
     get_daily_appointments,
+    get_appointment_by_id,
     create_appointment,
     update_appointment,
     AppointmentServiceError,
@@ -26,6 +29,33 @@ from app.core.logger import get_logger
 logger = get_logger("app.api.appointments")
 
 router = APIRouter(prefix="/appointments", tags=["Appointments"])
+
+
+@router.get(
+    "/statuses",
+    response_model=list[AppointmentStatusResponse],
+    summary="Get appointment statuses",
+    description="Get all appointment statuses for kanban column configuration.",
+)
+def get_appointment_statuses(
+    db: Session = Depends(get_db),
+) -> list[AppointmentStatusResponse]:
+    """
+    Get all appointment statuses ordered for kanban display.
+
+    Returns:
+        List of appointment statuses with display_text and order
+    """
+    statuses = db.query(AppointmentStatus).order_by(AppointmentStatus.order).all()
+    return [
+        AppointmentStatusResponse(
+            id=s.id,
+            name=s.name,
+            display_text=s.display_text,
+            order=s.order,
+        )
+        for s in statuses
+    ]
 
 
 @router.get(
@@ -120,6 +150,7 @@ def create_new_appointment(
             duration_minutes=appointment.duration_minutes,
             services=services,
             status=appointment.status.name if appointment.status else "scheduled",
+            is_confirmed=appointment.is_confirmed,
             notes=appointment.notes,
         )
 
@@ -135,6 +166,66 @@ def create_new_appointment(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create appointment",
+        )
+
+
+@router.get(
+    "/{appointment_id}",
+    response_model=UpdateAppointmentResponse,
+    summary="Get a single appointment",
+    description="Get details of a specific appointment by ID.",
+)
+def get_appointment(
+    appointment_id: int,
+    business_id: BusinessId,
+    db: Session = Depends(get_db),
+) -> UpdateAppointmentResponse:
+    """
+    Get a single appointment by ID.
+
+    Returns full appointment details including pet, customer, staff, and services.
+    """
+    try:
+        appointment = get_appointment_by_id(
+            db=db,
+            business_id=business_id,
+            appointment_id=appointment_id,
+        )
+
+        # Build the response with related data
+        services = [
+            AppointmentServiceSchema(name=s.name, price=0)
+            for s in appointment.services
+        ]
+
+        return UpdateAppointmentResponse(
+            id=appointment.id,
+            pet_id=appointment.pet_id,
+            pet_name=appointment.pet.name if appointment.pet else "Unknown",
+            customer_id=appointment.customer_id,
+            customer_name=appointment.customer.account_name if appointment.customer else "Unknown",
+            staff_id=appointment.staff_id,
+            staff_name=f"{appointment.staff_member.first_name} {appointment.staff_member.last_name}" if appointment.staff_member else "Unknown",
+            appointment_datetime=appointment.appointment_datetime,
+            duration_minutes=appointment.duration_minutes,
+            services=services,
+            status=appointment.status.name if appointment.status else "scheduled",
+            is_confirmed=appointment.is_confirmed,
+            notes=appointment.notes,
+        )
+
+    except AppointmentServiceError as e:
+        logger.warning(f"Appointment fetch failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+
+    except Exception as e:
+        logger.error(f"Error fetching appointment {appointment_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch appointment",
         )
 
 
@@ -159,6 +250,7 @@ def update_existing_appointment(
         - appointment_datetime: Change the time (not date)
         - duration_minutes: Change the duration
         - notes: Update notes
+        - status: Change the appointment status
     """
     try:
         appointment = update_appointment(
@@ -170,6 +262,8 @@ def update_existing_appointment(
             appointment_datetime=request.appointment_datetime,
             duration_minutes=request.duration_minutes,
             notes=request.notes,
+            status=request.status,
+            is_confirmed=request.is_confirmed,
         )
 
         # Build the response with related data
@@ -190,6 +284,7 @@ def update_existing_appointment(
             duration_minutes=appointment.duration_minutes,
             services=services,
             status=appointment.status.name if appointment.status else "scheduled",
+            is_confirmed=appointment.is_confirmed,
             notes=appointment.notes,
         )
 

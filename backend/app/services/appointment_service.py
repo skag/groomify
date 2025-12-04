@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, cast, Date
 
-from app.models.appointment import Appointment, AppointmentStatus, AppointmentStatusName
+from app.models.appointment import Appointment, AppointmentStatus
 from app.models.business_user import BusinessUser, BusinessUserRole, BusinessUserRoleName
 from app.models.customer import Customer
 from app.models.pet import Pet
@@ -210,6 +210,8 @@ def get_daily_appointments(
             groomer_id=appt.staff_id,
             tags=[],  # Tags not implemented yet - placeholder
             status=appt.status.name if appt.status else None,
+            is_confirmed=appt.is_confirmed,
+            notes=appt.notes,
         )
 
         # Add to groomer's list if groomer exists in our dict
@@ -310,7 +312,7 @@ def create_appointment(
     # Get the "scheduled" status
     scheduled_status = (
         db.query(AppointmentStatus)
-        .filter(AppointmentStatus.name == AppointmentStatusName.SCHEDULED.value)
+        .filter(AppointmentStatus.name == "scheduled")
         .first()
     )
 
@@ -347,6 +349,7 @@ def create_appointment(
         appointment_datetime=appointment_datetime,
         duration_minutes=duration_minutes,
         status_id=scheduled_status.id,
+        is_confirmed=False,
         notes=notes,
     )
 
@@ -365,6 +368,51 @@ def create_appointment(
     return appointment
 
 
+def get_appointment_by_id(
+    db: Session,
+    business_id: int,
+    appointment_id: int,
+) -> Appointment:
+    """
+    Get a single appointment by ID.
+
+    Args:
+        db: Database session
+        business_id: Business ID
+        appointment_id: ID of the appointment to fetch
+
+    Returns:
+        Appointment object with related data
+
+    Raises:
+        AppointmentServiceError: If appointment not found
+    """
+    appointment = (
+        db.query(Appointment)
+        .options(
+            joinedload(Appointment.pet),
+            joinedload(Appointment.customer),
+            joinedload(Appointment.staff_member),
+            joinedload(Appointment.services),
+            joinedload(Appointment.status),
+        )
+        .filter(
+            and_(
+                Appointment.id == appointment_id,
+                Appointment.business_id == business_id,
+            )
+        )
+        .first()
+    )
+
+    if not appointment:
+        raise AppointmentServiceError(
+            f"Appointment {appointment_id} not found for business {business_id}"
+        )
+
+    return appointment
+
+
 def update_appointment(
     db: Session,
     business_id: int,
@@ -374,6 +422,8 @@ def update_appointment(
     appointment_datetime: datetime | None = None,
     duration_minutes: int | None = None,
     notes: str | None = None,
+    status: str | None = None,
+    is_confirmed: bool | None = None,
 ) -> Appointment:
     """
     Update an existing appointment.
@@ -387,6 +437,8 @@ def update_appointment(
         appointment_datetime: New appointment date and time (optional)
         duration_minutes: New duration in minutes (optional)
         notes: New notes (optional)
+        status: New status name (optional)
+        is_confirmed: New confirmation status (optional)
 
     Returns:
         Updated Appointment object
@@ -468,6 +520,21 @@ def update_appointment(
     # Update notes if provided (allow setting to None)
     if notes is not None:
         appointment.notes = notes
+
+    # Update status if provided
+    if status is not None:
+        new_status = (
+            db.query(AppointmentStatus)
+            .filter(AppointmentStatus.name == status)
+            .first()
+        )
+        if not new_status:
+            raise AppointmentServiceError(f"Status '{status}' not found")
+        appointment.status_id = new_status.id
+
+    # Update confirmation status if provided
+    if is_confirmed is not None:
+        appointment.is_confirmed = is_confirmed
 
     db.commit()
     db.refresh(appointment)

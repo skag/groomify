@@ -17,17 +17,32 @@ import click
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.core.database import SessionLocal
-from app.models.appointment import AppointmentStatus, AppointmentStatusName
+from app.models.appointment import AppointmentStatus
 from app.models.business_user import BusinessUserRole, BusinessUserRoleName
+
+# Status configuration - single source of truth for seeding
+# The database is the real source of truth once seeded
+APPOINTMENT_STATUSES = [
+    {"name": "scheduled", "display_text": "Scheduled", "order": 1},
+    {"name": "checked_in", "display_text": "Checked In", "order": 2},
+    {"name": "in_progress", "display_text": "In Process", "order": 3},
+    {"name": "ready_for_pickup", "display_text": "Ready for Pickup", "order": 4},
+    {"name": "cancelled", "display_text": "Cancelled", "order": 99},
+    {"name": "no_show", "display_text": "No Show", "order": 98},
+]
 
 
 def seed_appointment_statuses(db) -> int:
     """Seed appointment statuses lookup table."""
     created = 0
-    for status in AppointmentStatusName:
-        existing = db.query(AppointmentStatus).filter(AppointmentStatus.name == status.value).first()
+    for status_config in APPOINTMENT_STATUSES:
+        existing = db.query(AppointmentStatus).filter(AppointmentStatus.name == status_config["name"]).first()
         if not existing:
-            db.add(AppointmentStatus(name=status.value))
+            db.add(AppointmentStatus(
+                name=status_config["name"],
+                display_text=status_config["display_text"],
+                order=status_config["order"],
+            ))
             created += 1
     return created
 

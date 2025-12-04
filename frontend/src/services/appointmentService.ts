@@ -20,6 +20,8 @@ export interface DailyAppointmentItem {
   groomer_id: number;
   tags: string[];
   status: AppointmentStatus | null;
+  is_confirmed: boolean;
+  notes: string | null;
 }
 
 export interface GroomerWithAppointments {
@@ -60,6 +62,7 @@ export interface CreateAppointmentResponse {
   duration_minutes: number;
   services: AppointmentServiceInfo[];
   status: AppointmentStatus | null;
+  is_confirmed: boolean;
   notes: string | null;
 }
 
@@ -69,6 +72,15 @@ export interface UpdateAppointmentRequest {
   appointment_datetime?: string; // ISO datetime string
   duration_minutes?: number;
   notes?: string | null;
+  status?: AppointmentStatus;
+  is_confirmed?: boolean;
+}
+
+export interface AppointmentStatusResponse {
+  id: number;
+  name: string;
+  display_text: string;
+  order: number;
 }
 
 export interface UpdateAppointmentResponse {
@@ -83,6 +95,7 @@ export interface UpdateAppointmentResponse {
   duration_minutes: number;
   services: AppointmentServiceInfo[];
   status: AppointmentStatus | null;
+  is_confirmed: boolean;
   notes: string | null;
 }
 
@@ -97,6 +110,18 @@ function formatDateToISO(date: Date): string {
 }
 
 export const appointmentService = {
+  /**
+   * Get appointment statuses for kanban column configuration
+   */
+  getStatuses: async (): Promise<AppointmentStatusResponse[]> => {
+    return api.get<AppointmentStatusResponse[]>(
+      API_CONFIG.endpoints.appointments.statuses,
+      {
+        requiresAuth: true,
+      }
+    );
+  },
+
   /**
    * Get daily appointments grouped by groomer
    * @param date - The date to fetch appointments for
@@ -119,6 +144,19 @@ export const appointmentService = {
     return api.post<CreateAppointmentResponse>(
       API_CONFIG.endpoints.appointments.create,
       data,
+      {
+        requiresAuth: true,
+      }
+    );
+  },
+
+  /**
+   * Get a single appointment by ID
+   * @param id - The appointment ID
+   */
+  getAppointment: async (id: number): Promise<UpdateAppointmentResponse> => {
+    return api.get<UpdateAppointmentResponse>(
+      API_CONFIG.endpoints.appointments.get(id),
       {
         requiresAuth: true,
       }

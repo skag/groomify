@@ -77,6 +77,13 @@ interface SlotSelection {
   anchorRect: { top: number; left: number; width: number; height: number }
 }
 
+// Reschedule mode info passed from parent
+export interface RescheduleModeInfo {
+  active: boolean
+  appointmentId: number | null
+  originalServiceName?: string
+}
+
 interface AppointmentsCalendarProps {
   appointments: Appointment[]
   groomers: CalendarGroomer[]
@@ -89,6 +96,8 @@ interface AppointmentsCalendarProps {
   onPetSearch?: (query: string) => Promise<CalendarPet[]>
   // Services list for selection
   services?: CalendarService[]
+  // Reschedule mode info
+  rescheduleMode?: RescheduleModeInfo
   // Callback when booking is confirmed
   onBookingConfirm?: (booking: {
     petId: number
@@ -124,6 +133,7 @@ export function AppointmentsCalendar({
   preSelectedPet,
   onPetSearch,
   services = [],
+  rescheduleMode,
   onBookingConfirm,
   onAppointmentUpdate
 }: AppointmentsCalendarProps) {
@@ -998,7 +1008,7 @@ export function AppointmentsCalendar({
                     disabled={bookingMode === 'appointment' ? !canConfirmBooking : !blockReason}
                   >
                     {bookingMode === 'appointment'
-                      ? (isEditMode ? 'Update' : 'Confirm')
+                      ? (isEditMode ? 'Update' : (rescheduleMode?.active ? 'Reschedule' : 'Confirm'))
                       : 'Block Time'}
                   </Button>
                 </div>

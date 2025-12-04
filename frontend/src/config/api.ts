@@ -61,8 +61,10 @@ export const API_CONFIG = {
     },
     appointments: {
       create: '/api/appointments',
+      get: (id: number) => `/api/appointments/${id}`,
       update: (id: number) => `/api/appointments/${id}`,
       daily: (date: string) => `/api/appointments/daily?date=${date}`,
+      statuses: '/api/appointments/statuses',
     },
   },
 } as const;

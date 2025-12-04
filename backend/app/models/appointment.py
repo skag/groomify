@@ -1,22 +1,10 @@
 """Appointment model"""
 
 from datetime import datetime, timezone
-from sqlalchemy import String, DateTime, Integer, Text, ForeignKey, Table, Column
+from sqlalchemy import String, DateTime, Integer, Text, ForeignKey, Table, Column, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-import enum
 
 from app.core.database import Base
-
-
-class AppointmentStatusName(str, enum.Enum):
-    """Appointment status values (code constants)"""
-
-    SCHEDULED = "scheduled"
-    CONFIRMED = "confirmed"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    CANCELLED = "cancelled"
-    NO_SHOW = "no_show"
 
 
 class AppointmentStatus(Base):
@@ -26,9 +14,11 @@ class AppointmentStatus(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    display_text: Mapped[str] = mapped_column(String(100), nullable=False)
+    order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     def __repr__(self) -> str:
-        return f"<AppointmentStatus(id={self.id}, name='{self.name}')>"
+        return f"<AppointmentStatus(id={self.id}, name='{self.name}', display_text='{self.display_text}', order={self.order})>"
 
 
 class Appointment(Base):
@@ -56,6 +46,7 @@ class Appointment(Base):
     status_id: Mapped[int] = mapped_column(
         ForeignKey("appointment_statuses.id", ondelete="RESTRICT"), nullable=False, index=True
     )
+    is_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

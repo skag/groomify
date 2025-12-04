@@ -1,20 +1,19 @@
 """Appointment schemas"""
 
 from datetime import datetime, date
-from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
-from app.models.appointment import AppointmentStatusName
 
+class AppointmentStatusResponse(BaseModel):
+    """Response schema for appointment status (for kanban column configuration)"""
 
-StatusLiteral = Literal[
-    "scheduled",
-    "confirmed",
-    "in_progress",
-    "completed",
-    "cancelled",
-    "no_show",
-]
+    id: int
+    name: str
+    display_text: str
+    order: int
+
+    class Config:
+        from_attributes = True
 
 
 class AppointmentBase(BaseModel):
@@ -22,8 +21,8 @@ class AppointmentBase(BaseModel):
 
     appointment_datetime: datetime
     duration_minutes: int = Field(default=60, ge=15, le=480)
-    status: StatusLiteral = Field(
-        default=AppointmentStatusName.SCHEDULED.value,
+    status: str = Field(
+        default="scheduled",
         alias="status_name",
     )
     notes: str | None = None
@@ -55,7 +54,7 @@ class AppointmentUpdate(BaseModel):
 
     appointment_datetime: datetime | None = None
     duration_minutes: int | None = Field(None, ge=15, le=480)
-    status: StatusLiteral | None = None
+    status: str | None = None
     staff_id: int | None = None
     notes: str | None = None
 
@@ -71,6 +70,8 @@ class UpdateAppointmentRequest(BaseModel):
     appointment_datetime: datetime | None = None
     duration_minutes: int | None = Field(None, ge=15, le=480)
     notes: str | None = None
+    status: str | None = None
+    is_confirmed: bool | None = None
 
 
 class UpdateAppointmentResponse(BaseModel):
@@ -86,7 +87,8 @@ class UpdateAppointmentResponse(BaseModel):
     appointment_datetime: datetime
     duration_minutes: int
     services: list["AppointmentServiceSchema"]
-    status: StatusLiteral
+    status: str
+    is_confirmed: bool
     notes: str | None = None
 
     class Config:
@@ -145,7 +147,9 @@ class DailyAppointmentItem(BaseModel):
     groomer: str  # Staff member full name
     groomer_id: int
     tags: list[str] = []  # Pet behavioral tags (empty for now)
-    status: StatusLiteral | None = None
+    status: str | None = None
+    is_confirmed: bool = False
+    notes: str | None = None
 
 
 class GroomerWithAppointments(BaseModel):
@@ -188,7 +192,8 @@ class CreateAppointmentResponse(BaseModel):
     appointment_datetime: datetime
     duration_minutes: int
     services: list[AppointmentServiceSchema]
-    status: StatusLiteral
+    status: str
+    is_confirmed: bool
     notes: str | None = None
 
     class Config:

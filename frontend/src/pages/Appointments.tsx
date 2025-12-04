@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
-import { useNavigate, useParams } from "react-router-dom"
+import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { AppSidebar } from "@/components/app-sidebar"
 import {
   Breadcrumb,
@@ -16,7 +16,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ChevronLeft, ChevronRight, Loader2, Calendar, CalendarDays, Search, Dog } from "lucide-react"
+import { ChevronLeft, ChevronRight, Loader2, Calendar, CalendarDays, Search, Dog, X } from "lucide-react"
 import { AppointmentsCalendar, type Appointment, type CalendarDate, type CalendarGroomer, type CalendarPet, type CalendarService } from "@/components/AppointmentsCalendar"
 import { appointmentService, type DailyAppointmentsResponse, type CreateAppointmentRequest, type UpdateAppointmentRequest } from "@/services/appointmentService"
 import { petService, type PetSearchResult } from "@/services/petService"
@@ -73,9 +73,28 @@ function getWeekDates(startDate: Date): Date[] {
   return dates
 }
 
+// Reschedule mode state type
+interface RescheduleMode {
+  active: boolean
+  appointmentId: number | null
+  originalAppointment: {
+    id: number
+    petId: number
+    petName: string
+    owner: string
+    serviceId: number | null
+    serviceName: string
+    groomerId: number
+    groomerName: string
+    datetime: string
+    durationMinutes: number
+  } | null
+}
+
 export default function Appointments() {
   const navigate = useNavigate()
   const { petId } = useParams<{ petId?: string }>()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const [currentDate, setCurrentDate] = useState(new Date())
   const [viewMode, setViewMode] = useState<ViewMode>('day')
@@ -93,6 +112,13 @@ export default function Appointments() {
   const [searchResults, setSearchResults] = useState<SelectedPet[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [showSearchDropdown, setShowSearchDropdown] = useState(false)
+
+  // Reschedule mode state
+  const [rescheduleMode, setRescheduleMode] = useState<RescheduleMode>({
+    active: false,
+    appointmentId: null,
+    originalAppointment: null,
+  })
 
   // Load pet data when petId is provided in URL
   useEffect(() => {
@@ -124,6 +150,82 @@ export default function Appointments() {
 
     loadPet()
   }, [petId, navigate])
+
+  // Handle reschedule query parameter
+  useEffect(() => {
+    const rescheduleId = searchParams.get('reschedule')
+
+    if (!rescheduleId) {
+      // Clear reschedule mode if no query param
+      if (rescheduleMode.active) {
+        setRescheduleMode({
+          active: false,
+          appointmentId: null,
+          originalAppointment: null,
+        })
+      }
+      return
+    }
+
+    const appointmentId = parseInt(rescheduleId, 10)
+    if (isNaN(appointmentId)) {
+      // Invalid ID, clear the param
+      setSearchParams({}, { replace: true })
+      return
+    }
+
+    // Don't refetch if we already have this appointment loaded
+    if (rescheduleMode.appointmentId === appointmentId) {
+      return
+    }
+
+    // Fetch the appointment details
+    const loadAppointment = async () => {
+      setIsLoadingPet(true) // Reuse loading state
+      try {
+        const appointment = await appointmentService.getAppointment(appointmentId)
+
+        // Set reschedule mode with appointment data
+        setRescheduleMode({
+          active: true,
+          appointmentId: appointment.id,
+          originalAppointment: {
+            id: appointment.id,
+            petId: appointment.pet_id,
+            petName: appointment.pet_name,
+            owner: appointment.customer_name,
+            serviceId: appointment.services.length > 0 ? null : null, // Services don't have ID in response, will need to match by name
+            serviceName: appointment.services.length > 0 ? appointment.services[0].name : '',
+            groomerId: appointment.staff_id,
+            groomerName: appointment.staff_name,
+            datetime: appointment.appointment_datetime,
+            durationMinutes: appointment.duration_minutes,
+          },
+        })
+
+        // Also set the pet as selected (locked)
+        setSelectedPet({
+          id: appointment.pet_id.toString(),
+          name: appointment.pet_name,
+          owner: appointment.customer_name,
+          breed: '', // Not available in response
+          phone: null,
+          defaultGroomerId: appointment.staff_id,
+        })
+
+        // Switch to week view for reschedule
+        setViewMode('week')
+      } catch (error) {
+        console.error("Error loading appointment for reschedule:", error)
+        // Clear the param if appointment not found
+        setSearchParams({}, { replace: true })
+      } finally {
+        setIsLoadingPet(false)
+      }
+    }
+
+    loadAppointment()
+  }, [searchParams, setSearchParams, rescheduleMode.active, rescheduleMode.appointmentId])
 
   // Reset groomer selection when pet changes to use default groomer
   useEffect(() => {
@@ -325,6 +427,18 @@ export default function Appointments() {
     setSelectedGroomerIds(new Set()) // Reset to trigger select all on next fetch
   }
 
+  const handleCancelReschedule = () => {
+    // Clear reschedule query param and mode
+    setSearchParams({}, { replace: true })
+    setRescheduleMode({
+      active: false,
+      appointmentId: null,
+      originalAppointment: null,
+    })
+    setSelectedPet(null)
+    setSelectedGroomerIds(new Set(groomers.map(g => g.id)))
+  }
+
   const toggleGroomer = (groomerId: number) => {
     setSelectedGroomerIds(prev => {
       const newSet = new Set(prev)
@@ -403,6 +517,49 @@ export default function Appointments() {
       // Calculate duration from start and end times
       const durationMinutes = calculateDurationMinutes(booking.startTime, booking.endTime)
 
+      // If in reschedule mode, update the existing appointment instead of creating new
+      if (rescheduleMode.active && rescheduleMode.appointmentId) {
+        const updateRequest: UpdateAppointmentRequest = {
+          staff_id: booking.groomerId,
+          service_ids: [booking.serviceId],
+          appointment_datetime: appointmentDatetime.toISOString(),
+          duration_minutes: durationMinutes,
+        }
+
+        const response = await appointmentService.updateAppointment(rescheduleMode.appointmentId, updateRequest)
+
+        // Update local state - remove old appointment from its original date/time slot
+        // and add the updated one
+        setAppointments(prev => prev.map(appt => {
+          if (appt.id === rescheduleMode.appointmentId) {
+            return {
+              ...appt,
+              time: booking.startTime,
+              endTime: booking.endTime,
+              serviceId: booking.serviceId,
+              service: booking.serviceName,
+              groomer: response.staff_name,
+              groomerId: response.staff_id,
+              date: formatDateToISO(booking.date),
+            }
+          }
+          return appt
+        }))
+
+        // Clear reschedule mode
+        setSearchParams({}, { replace: true })
+        setRescheduleMode({
+          active: false,
+          appointmentId: null,
+          originalAppointment: null,
+        })
+        setSelectedPet(null)
+        setSelectedGroomerIds(new Set(groomers.map(g => g.id)))
+
+        return
+      }
+
+      // Normal booking flow - create new appointment
       const request: CreateAppointmentRequest = {
         pet_id: booking.petId,
         staff_id: booking.groomerId,
@@ -525,9 +682,39 @@ export default function Appointments() {
         </header>
 
         <div className="flex flex-1 flex-col gap-4 p-6 pt-0 overflow-hidden">
-          {/* Pet Search / Selection */}
+          {/* Pet Search / Selection / Reschedule Banner */}
           <div className="flex items-center gap-3 shrink-0">
-            {selectedPet ? (
+            {rescheduleMode.active && rescheduleMode.originalAppointment ? (
+              // Reschedule Mode Banner
+              <div className="flex items-center gap-4 p-3 bg-amber-50 border border-amber-200 rounded-lg w-full">
+                <div className="h-10 w-10 bg-amber-100 rounded-full flex items-center justify-center shrink-0">
+                  <Calendar className="h-5 w-5 text-amber-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-base text-amber-900">
+                    Rescheduling appointment for {rescheduleMode.originalAppointment.petName}
+                  </p>
+                  <p className="text-xs text-amber-700">
+                    Original: {new Date(rescheduleMode.originalAppointment.datetime).toLocaleDateString('en-US', {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })} • {rescheduleMode.originalAppointment.serviceName} • {rescheduleMode.originalAppointment.groomerName}
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCancelReschedule}
+                  className="shrink-0 border-amber-300 text-amber-700 hover:bg-amber-100"
+                >
+                  <X className="h-4 w-4 mr-1" />
+                  Cancel Reschedule
+                </Button>
+              </div>
+            ) : selectedPet ? (
               <div className="flex items-center gap-3">
                 <div className="h-10 w-10 bg-primary/10 rounded-full flex items-center justify-center">
                   <Dog className="h-5 w-5 text-primary" />
@@ -736,6 +923,11 @@ export default function Appointments() {
                 } : undefined}
                 onPetSearch={handlePetSearch}
                 services={services}
+                rescheduleMode={rescheduleMode.active ? {
+                  active: true,
+                  appointmentId: rescheduleMode.appointmentId,
+                  originalServiceName: rescheduleMode.originalAppointment?.serviceName,
+                } : undefined}
                 onBookingConfirm={handleBookingConfirm}
                 onAppointmentUpdate={handleAppointmentUpdate}
               />

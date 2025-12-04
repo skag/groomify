@@ -25,8 +25,25 @@ import click
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.core.database import SessionLocal
-from app.models.appointment import Appointment, AppointmentStatus, AppointmentStatusName
+from app.models.appointment import Appointment, AppointmentStatus
 from app.models.business import Business
+
+# Status names - these should match the database values
+STATUS_SCHEDULED = "scheduled"
+STATUS_CHECKED_IN = "checked_in"
+STATUS_IN_PROGRESS = "in_progress"
+STATUS_READY_FOR_PICKUP = "ready_for_pickup"
+STATUS_CANCELLED = "cancelled"
+STATUS_NO_SHOW = "no_show"
+
+ALL_STATUSES = [
+    STATUS_SCHEDULED,
+    STATUS_CHECKED_IN,
+    STATUS_IN_PROGRESS,
+    STATUS_READY_FOR_PICKUP,
+    STATUS_CANCELLED,
+    STATUS_NO_SHOW,
+]
 from app.models.business_user import BusinessUser, BusinessUserRole
 from app.models.customer import Customer
 from app.models.pet import Pet
@@ -117,36 +134,36 @@ def generate_appointment_time(target_date: datetime) -> datetime:
 def determine_status(appointment_datetime: datetime, now: datetime) -> str:
     """Determine appropriate status based on appointment datetime."""
     if appointment_datetime < now - timedelta(hours=4):
-        # Past appointments: mostly completed, some cancelled/no-show
-        weights = [0, 0, 0, 0.85, 0.10, 0.05]  # completed, cancelled, no_show
+        # Past appointments: mostly ready_for_pickup, some cancelled/no-show
+        weights = [0, 0, 0, 0.85, 0.10, 0.05]  # ready_for_pickup, cancelled, no_show
         statuses = [
-            AppointmentStatusName.SCHEDULED.value,
-            AppointmentStatusName.CONFIRMED.value,
-            AppointmentStatusName.IN_PROGRESS.value,
-            AppointmentStatusName.COMPLETED.value,
-            AppointmentStatusName.CANCELLED.value,
-            AppointmentStatusName.NO_SHOW.value,
+            STATUS_SCHEDULED,
+            STATUS_CHECKED_IN,
+            STATUS_IN_PROGRESS,
+            STATUS_READY_FOR_PICKUP,
+            STATUS_CANCELLED,
+            STATUS_NO_SHOW,
         ]
         return random.choices(statuses, weights=weights)[0]
     elif appointment_datetime < now:
-        # Recently past: in_progress or completed
+        # Recently past: in_progress or ready_for_pickup
         return random.choice([
-            AppointmentStatusName.IN_PROGRESS.value,
-            AppointmentStatusName.COMPLETED.value,
+            STATUS_IN_PROGRESS,
+            STATUS_READY_FOR_PICKUP,
         ])
     elif appointment_datetime < now + timedelta(days=7):
-        # Next week: mostly confirmed, some scheduled
+        # Next week: mostly checked_in, some scheduled
         return random.choice([
-            AppointmentStatusName.SCHEDULED.value,
-            AppointmentStatusName.CONFIRMED.value,
-            AppointmentStatusName.CONFIRMED.value,  # Higher weight for confirmed
+            STATUS_SCHEDULED,
+            STATUS_CHECKED_IN,
+            STATUS_CHECKED_IN,  # Higher weight for checked_in
         ])
     else:
         # Further future: mostly scheduled
         return random.choice([
-            AppointmentStatusName.SCHEDULED.value,
-            AppointmentStatusName.SCHEDULED.value,
-            AppointmentStatusName.CONFIRMED.value,
+            STATUS_SCHEDULED,
+            STATUS_SCHEDULED,
+            STATUS_CHECKED_IN,
         ])
 
 
@@ -451,8 +468,8 @@ def seed_appointments(business_id: int | None, clear_existing: bool, include_tod
 
         # Cache status IDs
         status_cache = {}
-        for status_name in AppointmentStatusName:
-            status_cache[status_name.value] = get_status_id(db, status_name.value)
+        for status_name in ALL_STATUSES:
+            status_cache[status_name] = get_status_id(db, status_name)
 
         # Parse today_date if provided, otherwise use current local time
         # Use local timezone for appointment times to match business hours
@@ -481,7 +498,7 @@ def seed_appointments(business_id: int | None, clear_existing: bool, include_tod
         past_appointments = 0
         future_appointments = 0
         overlapping_appointments = 0
-        status_counts = {s.value: 0 for s in AppointmentStatusName}
+        status_counts = {s: 0 for s in ALL_STATUSES}
 
         # Track used pets to avoid repeating the same pet too often
         used_pets: set[int] = set()

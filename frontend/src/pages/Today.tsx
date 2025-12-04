@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { AppSidebar } from "@/components/app-sidebar"
 import {
@@ -14,7 +14,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
-import { Plus, Clock, Dog, User, Calendar, X, ExternalLink, CheckCircle2, XCircle, AlertCircle, LayoutGrid, CalendarDays } from "lucide-react"
+import { Plus, Clock, Dog, User, Calendar, X, ExternalLink, CheckCircle2, XCircle, AlertCircle, LayoutGrid, CalendarDays, Loader2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import {
   Dialog,
@@ -28,27 +28,40 @@ import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { AppointmentsCalendar } from "@/components/AppointmentsCalendar"
+import { appointmentService } from "@/services/appointmentService"
+import type { AppointmentStatusResponse, DailyAppointmentItem } from "@/services/appointmentService"
+import type { AppointmentStatus as BackendAppointmentStatus } from "@/components/AppointmentCard"
+import type { CalendarGroomer } from "@/components/AppointmentsCalendar"
 
-type AppointmentStatus = "scheduled" | "checked-in" | "in-process" | "ready-for-pickup" | "checked-out"
 type ViewMode = "kanban" | "calendar"
 
+// Internal appointment type for Today page
 interface Appointment {
   id: number
   time: string
   endTime?: string
+  petId: number
   petName: string
   owner: string
   service: string
+  serviceId: number | null
   groomer: string
-  status: AppointmentStatus
+  groomerId: number
+  status: BackendAppointmentStatus
   amount: string
-  petId: string
   rabiesVaccination: {
     exists: boolean
     valid: boolean
   }
   notes: string
   tags?: string[]
+}
+
+// Status column configuration from backend
+interface KanbanColumn {
+  status: BackendAppointmentStatus
+  displayText: string
+  order: number
 }
 
 export default function Today() {
@@ -62,11 +75,85 @@ export default function Today() {
   const [checkoutAppointment, setCheckoutAppointment] = useState<Appointment | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>("kanban")
 
+  // Data state
+  const [appointments, setAppointments] = useState<Appointment[]>([])
+  const [columns, setColumns] = useState<KanbanColumn[]>([])
+  const [groomers, setGroomers] = useState<CalendarGroomer[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
   const todayDate = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
     year: 'numeric'
+  })
+
+  // Fetch data on mount
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        // Fetch statuses and daily appointments in parallel
+        const [statusesData, dailyData] = await Promise.all([
+          appointmentService.getStatuses(),
+          appointmentService.getDailyAppointments(new Date()),
+        ])
+
+        // Build columns from statuses - show all statuses from API
+        const kanbanColumns: KanbanColumn[] = statusesData
+          .sort((a: AppointmentStatusResponse, b: AppointmentStatusResponse) => a.order - b.order)
+          .map((s: AppointmentStatusResponse) => ({
+            status: s.name as BackendAppointmentStatus,
+            displayText: s.display_text,
+            order: s.order,
+          }))
+        setColumns(kanbanColumns)
+
+        // Extract groomers with id and name
+        const groomerList: CalendarGroomer[] = dailyData.groomers.map(g => ({
+          id: g.id,
+          name: g.name,
+        }))
+        setGroomers(groomerList)
+
+        // Transform daily appointments to internal format
+        const allAppointments: Appointment[] = []
+        for (const groomer of dailyData.groomers) {
+          for (const apt of groomer.appointments) {
+            allAppointments.push(transformAppointment(apt))
+          }
+        }
+        setAppointments(allAppointments)
+      } catch (err) {
+        console.error("Failed to fetch data:", err)
+        setError("Failed to load appointments. Please try again.")
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchData()
+  }, [])
+
+  // Transform backend appointment to internal format
+  const transformAppointment = (apt: DailyAppointmentItem): Appointment => ({
+    id: apt.id,
+    time: apt.time,
+    endTime: apt.end_time,
+    petId: apt.pet_id,
+    petName: apt.pet_name,
+    owner: apt.owner,
+    service: apt.service,
+    serviceId: apt.service_id,
+    groomer: apt.groomer,
+    groomerId: apt.groomer_id,
+    status: apt.status || "scheduled",
+    amount: "$0", // Placeholder until transactions are implemented
+    rabiesVaccination: { exists: false, valid: false }, // Placeholder until pet records are enhanced
+    notes: apt.notes || "",
+    tags: apt.tags,
   })
 
   const getTagColor = (tag: string) => {
@@ -107,13 +194,46 @@ export default function Today() {
     }
   }
 
-  const handleCheckIn = () => {
-    alert(`Checking in ${selectedAppointment?.petName}`)
+  const handleStatusChange = async (appointmentId: number, newStatus: BackendAppointmentStatus) => {
+    // Optimistic update
+    const oldAppointments = [...appointments]
+    setAppointments(appointments.map(apt =>
+      apt.id === appointmentId ? { ...apt, status: newStatus } : apt
+    ))
+
+    try {
+      await appointmentService.updateAppointment(appointmentId, { status: newStatus })
+    } catch (err) {
+      console.error("Failed to update status:", err)
+      // Revert on error
+      setAppointments(oldAppointments)
+      alert("Failed to update appointment status. Please try again.")
+    }
+  }
+
+  const handleCheckIn = async () => {
+    if (!selectedAppointment) return
+    await handleStatusChange(selectedAppointment.id, "checked_in")
+    handleCloseModal()
+  }
+
+  const handleStartProcess = async () => {
+    if (!selectedAppointment) return
+    await handleStatusChange(selectedAppointment.id, "in_progress")
+    handleCloseModal()
+  }
+
+  const handleMarkReady = async () => {
+    if (!selectedAppointment) return
+    await handleStatusChange(selectedAppointment.id, "ready_for_pickup")
     handleCloseModal()
   }
 
   const handleReschedule = () => {
-    alert(`Rescheduling appointment for ${selectedAppointment?.petName}`)
+    if (selectedAppointment) {
+      handleCloseModal()
+      navigate(`/appointments?reschedule=${selectedAppointment.id}`)
+    }
   }
 
   const handleBookNext = () => {
@@ -121,25 +241,26 @@ export default function Today() {
     navigate('/appointments/book')
   }
 
-  const handleCancel = () => {
-    alert(`Cancelling appointment for ${selectedAppointment?.petName}`)
-    handleCloseModal()
+  const handleCancel = async () => {
+    if (!selectedAppointment) return
+    if (confirm(`Are you sure you want to cancel the appointment for ${selectedAppointment.petName}?`)) {
+      await handleStatusChange(selectedAppointment.id, "cancelled")
+      handleCloseModal()
+    }
   }
 
   const handleViewPetDetails = () => {
-    alert(`Viewing details for ${selectedAppointment?.petName} (ID: ${selectedAppointment?.petId})`)
+    if (selectedAppointment) {
+      navigate(`/pets/${selectedAppointment.petId}`)
+    }
   }
 
   const handleCheckout = () => {
-    // Save the appointment for checkout
     setCheckoutAppointment(selectedAppointment)
-    // Pre-fill the checkout amount with the appointment amount
     if (selectedAppointment?.amount) {
       setCheckoutAmount(selectedAppointment.amount.replace('$', ''))
     }
-    // Close the appointment details modal first
     setSelectedAppointment(null)
-    // Then open the checkout modal
     setShowCheckoutModal(true)
   }
 
@@ -156,156 +277,99 @@ export default function Today() {
     setCheckoutAmount("")
   }
 
-  const groomers = ["Sarah Johnson", "Mike Chen", "Emily Rodriguez", "James Wilson", "Lisa Parker"]
-
-  const [appointments, setAppointments] = useState<Appointment[]>([
-    {
-      id: 1,
-      time: "9:00 AM",
-      endTime: "10:30 AM",
-      petName: "Max",
-      owner: "Smith Family",
-      service: "Full Grooming",
-      groomer: "Sarah Johnson",
-      status: "checked-out",
-      amount: "$65",
-      petId: "PET001",
-      rabiesVaccination: { exists: true, valid: true },
-      notes: "Completed grooming session. Customer satisfied.",
-      tags: ["FRE", "KDR"]
-    },
-    {
-      id: 9,
-      time: "12:00 PM",
-      endTime: "2:00 PM",
-      petName: "Rocky",
-      owner: "Brown Family",
-      service: "Full Grooming",
-      groomer: "Sarah Johnson",
-      status: "ready-for-pickup",
-      amount: "$68",
-      petId: "PET009",
-      rabiesVaccination: { exists: true, valid: true },
-      notes: "Grooming completed. Ready for owner to pick up.",
-      tags: ["FRE"]
-    },
-    {
-      id: 2,
-      time: "10:00 AM",
-      endTime: "11:15 AM",
-      petName: "Bella",
-      owner: "Smith Family",
-      service: "Bath & Brush",
-      groomer: "Mike Chen",
-      status: "in-process",
-      amount: "$45",
-      petId: "PET002",
-      rabiesVaccination: { exists: true, valid: true },
-      notes: "Currently being groomed. Going well.",
-      tags: ["NOF"]
-    },
-    {
-      id: 3,
-      time: "11:00 AM",
-      endTime: "12:30 PM",
-      petName: "Charlie",
-      owner: "Johnson Household",
-      service: "Full Grooming",
-      groomer: "Sarah Johnson",
-      status: "checked-in",
-      amount: "$70",
-      petId: "PET003",
-      rabiesVaccination: { exists: true, valid: false },
-      notes: "Needs nail trim. Rabies vaccine expired.",
-      tags: ["KEN", "ESC"]
-    },
-    {
-      id: 4,
-      time: "1:00 PM",
-      endTime: "2:00 PM",
-      petName: "Luna",
-      owner: "Williams Pets",
-      service: "Nail Trim",
-      groomer: "Emily Rodriguez",
-      status: "scheduled",
-      amount: "$25",
-      petId: "PET004",
-      rabiesVaccination: { exists: false, valid: false },
-      notes: "",
-      tags: ["NoK"]
-    },
-    {
-      id: 5,
-      time: "2:00 PM",
-      endTime: "3:30 PM",
-      petName: "Cooper",
-      owner: "Williams Pets",
-      service: "Full Grooming",
-      groomer: "Mike Chen",
-      status: "scheduled",
-      amount: "$75",
-      petId: "PET005",
-      rabiesVaccination: { exists: true, valid: true },
-      notes: "Regular customer. Prefers shorter cut.",
-      tags: ["FRE"]
-    },
-    {
-      id: 6,
-      time: "3:00 PM",
-      endTime: "4:15 PM",
-      petName: "Daisy",
-      owner: "Williams Pets",
-      service: "Bath & Brush",
-      groomer: "Sarah Johnson",
-      status: "scheduled",
-      amount: "$45",
-      petId: "PET006",
-      rabiesVaccination: { exists: true, valid: true },
-      notes: "",
-      tags: ["Jmp", "NOF"]
-    },
-    {
-      id: 7,
-      time: "4:00 PM",
-      endTime: "5:30 PM",
-      petName: "Milo",
-      owner: "Davis Residence",
-      service: "Full Grooming",
-      groomer: "Emily Rodriguez",
-      status: "scheduled",
-      amount: "$55",
-      petId: "PET007",
-      rabiesVaccination: { exists: true, valid: true },
-      notes: "Sensitive skin. Use hypoallergenic shampoo.",
-      tags: ["FRE", "KDR"]
-    },
-    {
-      id: 8,
-      time: "5:00 PM",
-      endTime: "6:15 PM",
-      petName: "Sadie",
-      owner: "Davis Residence",
-      service: "Bath & Brush",
-      groomer: "Mike Chen",
-      status: "scheduled",
-      amount: "$45",
-      petId: "PET008",
-      rabiesVaccination: { exists: true, valid: true },
-      notes: "",
-      tags: ["NoK"]
-    },
-  ])
-
-  const columns: { status: AppointmentStatus; title: string; count: number }[] = [
-    { status: "scheduled", title: "Scheduled", count: appointments.filter(a => a.status === "scheduled").length },
-    { status: "checked-in", title: "Checked In", count: appointments.filter(a => a.status === "checked-in").length },
-    { status: "in-process", title: "In Process", count: appointments.filter(a => a.status === "in-process").length },
-    { status: "ready-for-pickup", title: "Ready for Pickup", count: appointments.filter(a => a.status === "ready-for-pickup").length },
-    { status: "checked-out", title: "Checked Out", count: appointments.filter(a => a.status === "checked-out").length },
-  ]
-
   const handleBookAppointment = () => {
     navigate('/appointments/book')
+  }
+
+  const handleSaveNotes = async () => {
+    if (!selectedAppointment) return
+
+    // Optimistic update
+    const oldAppointments = [...appointments]
+    setAppointments(appointments.map(apt =>
+      apt.id === selectedAppointment.id ? { ...apt, notes: appointmentNotes } : apt
+    ))
+    setSelectedAppointment({ ...selectedAppointment, notes: appointmentNotes })
+
+    try {
+      await appointmentService.updateAppointment(selectedAppointment.id, { notes: appointmentNotes })
+    } catch (err) {
+      console.error("Failed to save notes:", err)
+      // Revert on error
+      setAppointments(oldAppointments)
+      setSelectedAppointment({ ...selectedAppointment, notes: selectedAppointment.notes })
+      alert("Failed to save notes. Please try again.")
+    }
+  }
+
+  // Get display text for a status
+  const getStatusDisplayText = (status: BackendAppointmentStatus): string => {
+    const column = columns.find(c => c.status === status)
+    return column?.displayText || status
+  }
+
+  // Determine which action button to show based on status
+  const getActionButton = () => {
+    if (!selectedAppointment) return null
+
+    switch (selectedAppointment.status) {
+      case "scheduled":
+        return (
+          <Button onClick={handleCheckIn} className="w-full sm:w-auto">
+            Check In
+          </Button>
+        )
+      case "checked_in":
+        return (
+          <Button onClick={handleStartProcess} className="w-full sm:w-auto">
+            Start Process
+          </Button>
+        )
+      case "in_progress":
+        return (
+          <Button onClick={handleMarkReady} className="w-full sm:w-auto">
+            Mark Ready
+          </Button>
+        )
+      case "ready_for_pickup":
+        return (
+          <Button onClick={handleCheckout} className="w-full sm:w-auto">
+            Checkout
+          </Button>
+        )
+      case "completed":
+        // No action for completed appointments
+        return null
+      default:
+        return null
+    }
+  }
+
+  if (loading) {
+    return (
+      <SidebarProvider>
+        <AppSidebar />
+        <SidebarInset>
+          <div className="flex items-center justify-center h-full">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        </SidebarInset>
+      </SidebarProvider>
+    )
+  }
+
+  if (error) {
+    return (
+      <SidebarProvider>
+        <AppSidebar />
+        <SidebarInset>
+          <div className="flex flex-col items-center justify-center h-full gap-4">
+            <p className="text-destructive">{error}</p>
+            <Button onClick={() => window.location.reload()}>Retry</Button>
+          </div>
+        </SidebarInset>
+      </SidebarProvider>
+    )
   }
 
   return (
@@ -366,79 +430,80 @@ export default function Today() {
 
           {/* Kanban Board */}
           {viewMode === "kanban" && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 flex-1">
-            {columns.map((column) => (
-              <div key={column.status} className="flex flex-col gap-3">
-                {/* Column Header */}
-                <div className="flex items-center justify-between px-3 py-2 bg-muted rounded-lg">
-                  <h3 className="font-semibold text-sm">{column.title}</h3>
-                  <Badge variant="secondary" className="rounded-full">
-                    {column.count}
-                  </Badge>
-                </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 flex-1">
+            {columns.map((column) => {
+              const columnAppointments = appointments.filter(a => a.status === column.status)
+              return (
+                <div key={column.status} className="flex flex-col gap-3">
+                  {/* Column Header */}
+                  <div className="flex items-center justify-between px-3 py-2 bg-muted rounded-lg">
+                    <h3 className="font-semibold text-sm">{column.displayText}</h3>
+                    <Badge variant="secondary" className="rounded-full">
+                      {columnAppointments.length}
+                    </Badge>
+                  </div>
 
-                {/* Appointment Cards */}
-                <div className="flex flex-col gap-2 min-h-[200px]">
-                  {appointments
-                    .filter(apt => apt.status === column.status)
-                    .map((appointment) => (
-                      <div
-                        key={appointment.id}
-                        className="rounded-lg border bg-card p-4 shadow-sm hover:shadow-md transition-shadow cursor-pointer"
-                        onClick={() => handleAppointmentClick(appointment)}
-                      >
-                        <div className="flex flex-col gap-3">
-                          {/* Time */}
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Clock className="h-3.5 w-3.5" />
-                            <span>{appointment.time}</span>
-                          </div>
-
-                          {/* Pet and Owner */}
-                          <div className="flex items-start gap-2">
-                            <div className="h-8 w-8 bg-primary/10 rounded-full flex items-center justify-center shrink-0">
-                              <Dog className="h-4 w-4 text-primary" />
+                  {/* Appointment Cards */}
+                  <div className="flex flex-col gap-2 min-h-[200px]">
+                    {columnAppointments.map((appointment) => (
+                        <div
+                          key={appointment.id}
+                          className="rounded-lg border bg-card p-4 shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+                          onClick={() => handleAppointmentClick(appointment)}
+                        >
+                          <div className="flex flex-col gap-3">
+                            {/* Time */}
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <Clock className="h-3.5 w-3.5" />
+                              <span>{appointment.time}</span>
                             </div>
-                            <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-                              <p className="font-semibold text-sm truncate">
-                                {appointment.petName}
-                              </p>
-                              <p className="text-xs text-muted-foreground truncate">
-                                {appointment.owner}
-                              </p>
+
+                            {/* Pet and Owner */}
+                            <div className="flex items-start gap-2">
+                              <div className="h-8 w-8 bg-primary/10 rounded-full flex items-center justify-center shrink-0">
+                                <Dog className="h-4 w-4 text-primary" />
+                              </div>
+                              <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                                <p className="font-semibold text-sm truncate">
+                                  {appointment.petName}
+                                </p>
+                                <p className="text-xs text-muted-foreground truncate">
+                                  {appointment.owner}
+                                </p>
+                              </div>
                             </div>
-                          </div>
 
-                          {/* Service */}
-                          <p className="text-sm text-muted-foreground">
-                            {appointment.service}
-                          </p>
+                            {/* Service */}
+                            <p className="text-sm text-muted-foreground">
+                              {appointment.service}
+                            </p>
 
-                          {/* Groomer */}
-                          <div className="flex items-center gap-2 text-sm">
-                            <User className="h-3.5 w-3.5 text-muted-foreground" />
-                            <span className="text-muted-foreground">{appointment.groomer}</span>
-                          </div>
-
-                          {/* Tags */}
-                          {appointment.tags && appointment.tags.length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {appointment.tags.map((tag) => (
-                                <div
-                                  key={tag}
-                                  className={`text-xs px-1.5 py-0.5 h-5 font-medium rounded-md flex items-center ${getTagColor(tag)}`}
-                                >
-                                  {tag}
-                                </div>
-                              ))}
+                            {/* Groomer */}
+                            <div className="flex items-center gap-2 text-sm">
+                              <User className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span className="text-muted-foreground">{appointment.groomer}</span>
                             </div>
-                          )}
+
+                            {/* Tags */}
+                            {appointment.tags && appointment.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {appointment.tags.map((tag) => (
+                                  <div
+                                    key={tag}
+                                    className={`text-xs px-1.5 py-0.5 h-5 font-medium rounded-md flex items-center ${getTagColor(tag)}`}
+                                  >
+                                    {tag}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
           )}
 
@@ -453,57 +518,24 @@ export default function Today() {
                 owner: apt.owner,
                 service: apt.service,
                 groomer: apt.groomer,
+                groomerId: apt.groomerId,
+                date: new Date().toISOString().split('T')[0], // Today's date
                 tags: apt.tags,
                 status: apt.status
               }))}
               groomers={groomers}
+              dates={[{
+                date: new Date(),
+                dateStr: new Date().toISOString().split('T')[0],
+                label: new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' }),
+                isToday: true,
+              }]}
+              viewMode="day"
               onAppointmentClick={(appointment) => {
                 const fullAppointment = appointments.find(a => a.id === appointment.id)
                 if (fullAppointment) {
                   handleAppointmentClick(fullAppointment)
                 }
-              }}
-              onSlotClick={(groomer, timeSlot) => {
-                // Calculate end time (1 hour later)
-                const parseTime = (timeStr: string) => {
-                  const [time, period] = timeStr.split(' ')
-                  let [hours, minutes] = time.split(':').map(Number)
-                  if (period === 'PM' && hours !== 12) hours += 12
-                  if (period === 'AM' && hours === 12) hours = 0
-                  return hours * 60 + minutes
-                }
-
-                const formatTime = (minutes: number) => {
-                  let hours = Math.floor(minutes / 60)
-                  const mins = minutes % 60
-                  const period = hours >= 12 ? 'PM' : 'AM'
-                  if (hours > 12) hours -= 12
-                  if (hours === 0) hours = 12
-                  return `${hours}:${mins.toString().padStart(2, '0')} ${period}`
-                }
-
-                const startMinutes = parseTime(timeSlot)
-                const endMinutes = startMinutes + 60
-                const endTime = formatTime(endMinutes)
-
-                // Create a new appointment
-                const newAppointment: Appointment = {
-                  id: Math.max(...appointments.map(a => a.id)) + 1,
-                  time: timeSlot,
-                  endTime: endTime,
-                  petName: "New Appointment",
-                  owner: "TBD",
-                  service: "To be scheduled",
-                  groomer: groomer,
-                  status: "scheduled",
-                  amount: "$0",
-                  petId: "TBD",
-                  rabiesVaccination: { exists: false, valid: false },
-                  notes: "",
-                  tags: []
-                }
-
-                setAppointments([...appointments, newAppointment])
               }}
             />
           )}
@@ -569,7 +601,9 @@ export default function Today() {
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Status:</span>
-                <Badge variant="secondary">{selectedAppointment?.status}</Badge>
+                <Badge variant="secondary">
+                  {selectedAppointment && getStatusDisplayText(selectedAppointment.status)}
+                </Badge>
               </div>
             </div>
 
@@ -612,9 +646,18 @@ export default function Today() {
                 placeholder="Add notes about this appointment..."
                 className="min-h-[80px]"
               />
+              {appointmentNotes !== selectedAppointment?.notes && (
+                <Button
+                  size="sm"
+                  onClick={handleSaveNotes}
+                  className="w-full"
+                >
+                  Save Notes
+                </Button>
+              )}
             </div>
 
-           
+
           </div>
 
           <DialogFooter className="flex-col sm:flex-row gap-2">
@@ -636,16 +679,7 @@ export default function Today() {
                 Cancel
               </Button>
             </div>
-            {selectedAppointment?.status === "scheduled" && (
-              <Button onClick={handleCheckIn} className="w-full sm:w-auto">
-                Check In
-              </Button>
-            )}
-            {selectedAppointment?.status === "ready-for-pickup" && (
-              <Button onClick={handleCheckout} className="w-full sm:w-auto">
-                Checkout
-              </Button>
-            )}
+            {getActionButton()}
           </DialogFooter>
         </DialogContent>
       </Dialog>

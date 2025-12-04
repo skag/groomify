@@ -4,9 +4,11 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, cast, Date
 
-from app.models.appointment import Appointment
+from app.models.appointment import Appointment, AppointmentStatus, AppointmentStatusName
 from app.models.business_user import BusinessUser, BusinessUserRole, BusinessUserRoleName
 from app.models.customer import Customer
+from app.models.pet import Pet
+from app.models.service import Service
 from app.schemas.appointment import (
     CustomerAppointmentHistory,
     AppointmentServiceSchema,
@@ -183,18 +185,22 @@ def get_daily_appointments(
     for appt in appointments:
         end_time = appt.appointment_datetime + timedelta(minutes=appt.duration_minutes)
 
-        # Get primary service name (first service, or "No Service" if empty)
+        # Get primary service (first service, or None if empty)
         service_name = "No Service"
+        service_id = None
         if appt.services and len(appt.services) > 0:
             service_name = appt.services[0].name
+            service_id = appt.services[0].id
 
         # Build the daily appointment item
         item = DailyAppointmentItem(
             id=appt.id,
             time=_format_time_12h(appt.appointment_datetime),
             end_time=_format_time_12h(end_time),
+            pet_id=appt.pet_id,
             pet_name=appt.pet.name if appt.pet else "Unknown",
             owner=appt.customer.account_name if appt.customer else "Unknown",
+            service_id=service_id,
             service=service_name,
             groomer=(
                 f"{appt.staff_member.first_name} {appt.staff_member.last_name}"
@@ -232,3 +238,128 @@ def get_daily_appointments(
         total_appointments=len(appointments),
         groomers=groomer_responses,
     )
+
+
+def create_appointment(
+    db: Session,
+    business_id: int,
+    pet_id: int,
+    staff_id: int,
+    service_ids: list[int],
+    appointment_datetime: datetime,
+    duration_minutes: int,
+    notes: str | None = None,
+) -> Appointment:
+    """
+    Create a new appointment.
+
+    Args:
+        db: Database session
+        business_id: Business ID
+        pet_id: Pet ID for the appointment
+        staff_id: Staff member (groomer) ID
+        service_ids: List of service IDs
+        appointment_datetime: Appointment date and time
+        duration_minutes: Duration in minutes
+        notes: Optional notes
+
+    Returns:
+        Created Appointment object
+
+    Raises:
+        AppointmentServiceError: If validation fails
+    """
+    # Get the pet and verify it belongs to the business
+    pet = (
+        db.query(Pet)
+        .filter(
+            and_(
+                Pet.id == pet_id,
+                Pet.business_id == business_id,
+            )
+        )
+        .first()
+    )
+
+    if not pet:
+        raise AppointmentServiceError(
+            f"Pet {pet_id} not found for business {business_id}"
+        )
+
+    # Get customer_id from the pet
+    customer_id = pet.customer_id
+
+    # Verify staff member belongs to the business
+    staff_member = (
+        db.query(BusinessUser)
+        .filter(
+            and_(
+                BusinessUser.id == staff_id,
+                BusinessUser.business_id == business_id,
+                BusinessUser.is_active == True,
+            )
+        )
+        .first()
+    )
+
+    if not staff_member:
+        raise AppointmentServiceError(
+            f"Staff member {staff_id} not found or not active for business {business_id}"
+        )
+
+    # Get the "scheduled" status
+    scheduled_status = (
+        db.query(AppointmentStatus)
+        .filter(AppointmentStatus.name == AppointmentStatusName.SCHEDULED.value)
+        .first()
+    )
+
+    if not scheduled_status:
+        raise AppointmentServiceError("Scheduled status not found in database")
+
+    # Verify services exist and belong to the business
+    services: list[Service] = []
+    if service_ids:
+        services = (
+            db.query(Service)
+            .filter(
+                and_(
+                    Service.id.in_(service_ids),
+                    Service.business_id == business_id,
+                )
+            )
+            .all()
+        )
+
+        if len(services) != len(service_ids):
+            found_ids = {s.id for s in services}
+            missing_ids = set(service_ids) - found_ids
+            raise AppointmentServiceError(
+                f"Services not found for business: {missing_ids}"
+            )
+
+    # Create the appointment
+    appointment = Appointment(
+        business_id=business_id,
+        customer_id=customer_id,
+        pet_id=pet_id,
+        staff_id=staff_id,
+        appointment_datetime=appointment_datetime,
+        duration_minutes=duration_minutes,
+        status_id=scheduled_status.id,
+        notes=notes,
+    )
+
+    # Add services to appointment
+    appointment.services = services
+
+    db.add(appointment)
+    db.commit()
+    db.refresh(appointment)
+
+    logger.info(
+        f"Created appointment {appointment.id} for pet {pet_id} "
+        f"with groomer {staff_id} at {appointment_datetime}"
+    )
+
+    return appointment

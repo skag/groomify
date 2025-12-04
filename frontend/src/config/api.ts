@@ -60,6 +60,7 @@ export const API_CONFIG = {
       delete: (id: number) => `/api/pets/${id}`,
     },
     appointments: {
+      create: '/api/appointments',
       daily: (date: string) => `/api/appointments/daily?date=${date}`,
     },
   },

@@ -107,8 +107,10 @@ class DailyAppointmentItem(BaseModel):
     id: int
     time: str  # Formatted as "9:00 AM"
     end_time: str  # Formatted as "10:30 AM"
+    pet_id: int
     pet_name: str
     owner: str  # Customer account_name
+    service_id: int | None = None  # Primary service ID (first in list)
     service: str  # Primary service name (first in list)
     groomer: str  # Staff member full name
     groomer_id: int
@@ -130,3 +132,34 @@ class DailyAppointmentsResponse(BaseModel):
     date: date
     total_appointments: int
     groomers: list[GroomerWithAppointments]
+
+
+class CreateAppointmentRequest(BaseModel):
+    """Request schema for creating an appointment from calendar"""
+
+    pet_id: int
+    staff_id: int
+    service_ids: list[int] = Field(default_factory=list)
+    appointment_datetime: datetime
+    duration_minutes: int = Field(ge=15, le=480)
+    notes: str | None = None
+
+
+class CreateAppointmentResponse(BaseModel):
+    """Response schema for created appointment"""
+
+    id: int
+    pet_id: int
+    pet_name: str
+    customer_id: int
+    customer_name: str
+    staff_id: int
+    staff_name: str
+    appointment_datetime: datetime
+    duration_minutes: int
+    services: list[AppointmentServiceSchema]
+    status: StatusLiteral
+    notes: str | None = None
+
+    class Config:
+        from_attributes = True

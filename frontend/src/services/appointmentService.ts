@@ -11,8 +11,10 @@ export interface DailyAppointmentItem {
   id: number;
   time: string;
   end_time: string;
+  pet_id: number;
   pet_name: string;
   owner: string;
+  service_id: number | null;
   service: string;
   groomer: string;
   groomer_id: number;
@@ -30,6 +32,35 @@ export interface DailyAppointmentsResponse {
   date: string;
   total_appointments: number;
   groomers: GroomerWithAppointments[];
+}
+
+export interface CreateAppointmentRequest {
+  pet_id: number;
+  staff_id: number;
+  service_ids: number[];
+  appointment_datetime: string; // ISO datetime string
+  duration_minutes: number;
+  notes?: string | null;
+}
+
+export interface AppointmentServiceInfo {
+  name: string;
+  price: number;
+}
+
+export interface CreateAppointmentResponse {
+  id: number;
+  pet_id: number;
+  pet_name: string;
+  customer_id: number;
+  customer_name: string;
+  staff_id: number;
+  staff_name: string;
+  appointment_datetime: string;
+  duration_minutes: number;
+  services: AppointmentServiceInfo[];
+  status: AppointmentStatus | null;
+  notes: string | null;
 }
 
 /**
@@ -51,6 +82,20 @@ export const appointmentService = {
     const dateStr = formatDateToISO(date);
     return api.get<DailyAppointmentsResponse>(
       API_CONFIG.endpoints.appointments.daily(dateStr),
+      {
+        requiresAuth: true,
+      }
+    );
+  },
+
+  /**
+   * Create a new appointment
+   * @param data - The appointment data
+   */
+  createAppointment: async (data: CreateAppointmentRequest): Promise<CreateAppointmentResponse> => {
+    return api.post<CreateAppointmentResponse>(
+      API_CONFIG.endpoints.appointments.create,
+      data,
       {
         requiresAuth: true,
       }

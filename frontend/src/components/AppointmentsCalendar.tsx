@@ -5,14 +5,17 @@ import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverAnchor } from "@/components/ui/popover"
 import { AppointmentCard, type AppointmentStatus } from "@/components/AppointmentCard"
 import { cn } from "@/lib/utils"
-import { Calendar, Clock, X, Search, Dog, Loader2, Scissors } from "lucide-react"
+import { Textarea } from "@/components/ui/textarea"
+import { Calendar, X, Search, Dog, Loader2, Scissors, Ban, ChevronDown } from "lucide-react"
 
 export interface Appointment {
   id: number
   time: string
   endTime: string
+  petId?: number
   petName: string
   owner: string
+  serviceId?: number
   service: string
   groomer: string
   groomerId: number
@@ -48,6 +51,19 @@ export interface CalendarService {
   duration_minutes: number
   price: number
 }
+
+// Block reasons for time blocking
+const BLOCK_REASONS = [
+  { id: 'lunch', label: 'Lunch Break' },
+  { id: 'meeting', label: 'Meeting' },
+  { id: 'personal', label: 'Personal Time' },
+  { id: 'training', label: 'Training' },
+  { id: 'cleaning', label: 'Equipment Cleaning' },
+  { id: 'maintenance', label: 'Maintenance' },
+  { id: 'vacation', label: 'Vacation' },
+  { id: 'sick', label: 'Sick Leave' },
+  { id: 'other', label: 'Other' },
+]
 
 // Selection state for the slot being created
 interface SlotSelection {
@@ -85,6 +101,18 @@ interface AppointmentsCalendarProps {
     startTime: string
     endTime: string
   }) => void
+  // Callback when appointment is updated
+  onAppointmentUpdate?: (appointmentId: number, update: {
+    petId: number
+    petName: string
+    groomerId: number
+    groomerName: string
+    serviceId: number
+    serviceName: string
+    date: Date
+    startTime: string
+    endTime: string
+  }) => void
 }
 
 export function AppointmentsCalendar({
@@ -96,13 +124,15 @@ export function AppointmentsCalendar({
   preSelectedPet,
   onPetSearch,
   services = [],
-  onBookingConfirm
+  onBookingConfirm,
+  onAppointmentUpdate
 }: AppointmentsCalendarProps) {
   const [activeAppointmentId, setActiveAppointmentId] = useState<number | null>(null)
   const [selection, setSelection] = useState<SlotSelection | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [dragStart, setDragStart] = useState<{ groomerId: number; groomerName: string; date: Date; dateStr: string; minutes: number; y: number } | null>(null)
   const [popoverOpen, setPopoverOpen] = useState(false)
+  const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null)
 
   // Popover form state
   const [selectedPet, setSelectedPet] = useState<CalendarPet | null>(null)
@@ -116,6 +146,10 @@ export function AppointmentsCalendar({
   const [serviceDropdownDirection, setServiceDropdownDirection] = useState<'up' | 'down'>('down')
   const [startTimeInput, setStartTimeInput] = useState("")
   const [endTimeInput, setEndTimeInput] = useState("")
+  const [bookingMode, setBookingMode] = useState<'appointment' | 'block'>('appointment')
+  const [blockReason, setBlockReason] = useState<string>('')
+  const [blockDescription, setBlockDescription] = useState<string>('')
+  const [showBlockReasonDropdown, setShowBlockReasonDropdown] = useState(false)
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const timeColumnRef = useRef<HTMLDivElement>(null)
@@ -158,6 +192,23 @@ export function AppointmentsCalendar({
     const period = hours24 >= 12 ? 'PM' : 'AM'
     const hours12 = hours24 === 0 ? 12 : hours24 > 12 ? hours24 - 12 : hours24
     return `${hours12}:${minutes.toString().padStart(2, '0')} ${period}`
+  }
+
+  // Convert 12-hour format (e.g., "9:00 AM") to 24-hour format (e.g., "09:00")
+  const to24HourFormat = (time12h: string): string => {
+    if (!time12h) return ""
+    const minutes = parseTimeToMinutes(time12h)
+    const hours = Math.floor(minutes / 60)
+    const mins = minutes % 60
+    return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`
+  }
+
+  // Convert 24-hour format (e.g., "09:00") to 12-hour format (e.g., "9:00 AM")
+  const to12HourFormat = (time24h: string): string => {
+    if (!time24h) return ""
+    const [hours, mins] = time24h.split(':').map(Number)
+    const totalMinutes = hours * 60 + mins
+    return formatMinutesToTimeString(totalMinutes)
   }
 
   // Helper to format hour (in 24h) to time string for display
@@ -253,21 +304,49 @@ export function AppointmentsCalendar({
     return groomerAppointments.length > 0 ? groomerAppointments[0] : null
   }
 
-  const handleAppointmentClick = (appointment: Appointment, overlappingAppts: Appointment[]) => {
+  const handleAppointmentClick = (appointment: Appointment, overlappingAppts: Appointment[], anchorRect: DOMRect) => {
     // If there are overlapping appointments
     if (overlappingAppts.length > 0) {
       // Check if this appointment is already active (in front)
       if (activeAppointmentId === appointment.id) {
-        // Already active, open the modal
-        onAppointmentClick?.(appointment)
+        // Already active, open edit popover
+        openEditPopover(appointment, anchorRect)
       } else {
-        // Not active, bring to front without opening modal
+        // Not active, bring to front without opening popover
         setActiveAppointmentId(appointment.id)
       }
     } else {
-      // No overlaps, open modal directly
-      onAppointmentClick?.(appointment)
+      // No overlaps, open edit popover directly
+      openEditPopover(appointment, anchorRect)
     }
+  }
+
+  // Open popover in edit mode for an existing appointment
+  const openEditPopover = (appointment: Appointment, anchorRect: DOMRect) => {
+    // Find the date object for this appointment
+    const dateObj = dates.find(d => d.dateStr === appointment.date)?.date || new Date(appointment.date)
+    const groomer = groomers.find(g => g.id === appointment.groomerId)
+
+    // Set up selection for popover positioning
+    setSelection({
+      groomerId: appointment.groomerId,
+      groomerName: groomer?.name || appointment.groomer,
+      date: dateObj,
+      dateStr: appointment.date,
+      startMinutes: parseTimeToMinutes(appointment.time),
+      endMinutes: parseTimeToMinutes(appointment.endTime),
+      anchorRect: {
+        top: anchorRect.top,
+        left: anchorRect.left,
+        width: anchorRect.width,
+        height: anchorRect.height
+      }
+    })
+
+    // Set editing appointment
+    setEditingAppointment(appointment)
+    setBookingMode('appointment')
+    setPopoverOpen(true)
   }
 
   // Count appointments per groomer per date
@@ -429,12 +508,37 @@ export function AppointmentsCalendar({
     }
   }, [dragStart, handleMouseMove, handleMouseUp])
 
-  // Set pre-selected pet when popover opens
+  // Set pre-selected pet when popover opens (for new appointments)
   useEffect(() => {
-    if (popoverOpen && preSelectedPet && !selectedPet) {
+    if (popoverOpen && preSelectedPet && !selectedPet && !editingAppointment) {
       setSelectedPet(preSelectedPet)
     }
   }, [popoverOpen, preSelectedPet])
+
+  // Pre-populate fields when editing an appointment
+  useEffect(() => {
+    if (popoverOpen && editingAppointment) {
+      // Set time inputs
+      setStartTimeInput(editingAppointment.time)
+      setEndTimeInput(editingAppointment.endTime)
+
+      // Create a CalendarPet from the appointment data
+      setSelectedPet({
+        id: editingAppointment.petId || 0,
+        name: editingAppointment.petName,
+        owner: editingAppointment.owner,
+        breed: '' // Not available from appointment
+      })
+
+      // Find and set the service - prefer serviceId if available, fallback to name matching
+      const matchingService = editingAppointment.serviceId
+        ? services.find(s => s.id === editingAppointment.serviceId)
+        : services.find(s => s.name === editingAppointment.service)
+      if (matchingService) {
+        setSelectedService(matchingService)
+      }
+    }
+  }, [popoverOpen, editingAppointment, services])
 
   // Debounced pet search
   useEffect(() => {
@@ -472,6 +576,7 @@ export function AppointmentsCalendar({
   const handleClosePopover = () => {
     setPopoverOpen(false)
     setSelection(null)
+    setEditingAppointment(null)
     // Reset form state
     setSelectedPet(null)
     setPetSearchQuery("")
@@ -480,6 +585,9 @@ export function AppointmentsCalendar({
     setServiceSearchQuery("")
     setStartTimeInput("")
     setEndTimeInput("")
+    setBookingMode('appointment')
+    setBlockReason('')
+    setBlockDescription('')
   }
 
   // Handle pet selection
@@ -489,11 +597,18 @@ export function AppointmentsCalendar({
     setShowPetDropdown(false)
   }
 
-  // Handle service selection
+  // Handle service selection - also adjusts end time based on service duration
   const handleSelectService = (service: CalendarService) => {
     setSelectedService(service)
     setServiceSearchQuery("")
     setShowServiceDropdown(false)
+
+    // Adjust end time based on service duration
+    if (startTimeInput) {
+      const startMinutes = parseTimeToMinutes(startTimeInput)
+      const newEndMinutes = startMinutes + service.duration_minutes
+      setEndTimeInput(formatMinutesToTimeString(newEndMinutes))
+    }
   }
 
   // Handle service input focus - determine dropdown direction based on available space
@@ -520,11 +635,11 @@ export function AppointmentsCalendar({
     s.name.toLowerCase().includes(serviceSearchQuery.toLowerCase())
   )
 
-  // Handle booking confirmation
+  // Handle booking confirmation (create or update)
   const handleConfirmBooking = () => {
-    if (!selection || !selectedPet || !selectedService || !onBookingConfirm) return
+    if (!selection || !selectedPet || !selectedService) return
 
-    onBookingConfirm({
+    const bookingData = {
       petId: selectedPet.id,
       petName: selectedPet.name,
       groomerId: selection.groomerId,
@@ -534,12 +649,24 @@ export function AppointmentsCalendar({
       date: selection.date,
       startTime: startTimeInput,
       endTime: endTimeInput
-    })
+    }
+
+    if (editingAppointment && onAppointmentUpdate) {
+      // Update existing appointment
+      onAppointmentUpdate(editingAppointment.id, bookingData)
+    } else if (onBookingConfirm) {
+      // Create new appointment
+      onBookingConfirm(bookingData)
+    }
+
     handleClosePopover()
   }
 
   // Check if booking can be confirmed
   const canConfirmBooking = selectedPet && selectedService && startTimeInput && endTimeInput
+
+  // Determine if we're in edit mode
+  const isEditMode = !!editingAppointment
 
   const totalColumns = dates.length * groomers.length
   const columnWidth = 150
@@ -571,22 +698,49 @@ export function AppointmentsCalendar({
         <PopoverAnchor
           style={{
             position: 'fixed',
-            top: selection?.anchorRect.top ?? 0,
+            top: '50%',
             left: selection?.anchorRect.left ?? 0,
             width: selection?.anchorRect.width ?? 0,
-            height: selection?.anchorRect.height ?? 0,
+            height: 0,
+            transform: 'translateY(-50%)',
             pointerEvents: 'none'
           }}
         />
         <PopoverContent
           side="right"
-          align="end"
-          className="w-80 p-0"
+          align="center"
+          className="w-[640px] p-0"
           onInteractOutside={handleClosePopover}
         >
-          <div className="p-4">
+          <div className="p-6">
             <div className="flex items-center justify-between mb-4">
-              <h4 className="font-semibold">Book Appointment</h4>
+              {isEditMode ? (
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Calendar className="h-4 w-4" />
+                  Edit Appointment
+                </div>
+              ) : (
+                <div className="flex gap-1 p-1 bg-muted rounded-lg">
+                  <Button
+                    variant={bookingMode === 'appointment' ? 'default' : 'ghost'}
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => setBookingMode('appointment')}
+                  >
+                    <Calendar className="h-4 w-4" />
+                    Appointment
+                  </Button>
+                  <Button
+                    variant={bookingMode === 'block' ? 'default' : 'ghost'}
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => setBookingMode('block')}
+                  >
+                    <Ban className="h-4 w-4" />
+                    Block
+                  </Button>
+                </div>
+              )}
               <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleClosePopover}>
                 <X className="h-4 w-4" />
               </Button>
@@ -594,73 +748,7 @@ export function AppointmentsCalendar({
 
             {selection && (
               <div className="space-y-4">
-                {/* Pet Search */}
-                <div className="space-y-2">
-                  <label className="text-xs font-medium text-muted-foreground">Pet</label>
-                  {selectedPet ? (
-                    <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-md">
-                      <Dog className="h-4 w-4 text-primary" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{selectedPet.name}</p>
-                        <p className="text-xs text-muted-foreground truncate">{selectedPet.owner} • {selectedPet.breed}</p>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 shrink-0"
-                        onClick={() => setSelectedPet(null)}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="relative">
-                      <div className="relative">
-                        {isPetSearching ? (
-                          <Loader2 className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground animate-spin" />
-                        ) : (
-                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        )}
-                        <Input
-                          placeholder="Search for a pet..."
-                          value={petSearchQuery}
-                          onChange={(e) => {
-                            setPetSearchQuery(e.target.value)
-                            setShowPetDropdown(true)
-                          }}
-                          onFocus={() => setShowPetDropdown(true)}
-                          onBlur={() => setTimeout(() => setShowPetDropdown(false), 200)}
-                          className="pl-9 h-9"
-                        />
-                      </div>
-                      {showPetDropdown && petSearchQuery.trim() && (
-                        <div className="absolute top-full left-0 right-0 mt-1 bg-white border rounded-md shadow-lg z-50 max-h-40 overflow-auto">
-                          {petSearchResults.length > 0 ? (
-                            petSearchResults.map((pet) => (
-                              <div
-                                key={pet.id}
-                                className="flex items-center gap-2 p-2 hover:bg-accent cursor-pointer"
-                                onMouseDown={() => handleSelectPet(pet)}
-                              >
-                                <Dog className="h-4 w-4 text-primary shrink-0" />
-                                <div className="min-w-0">
-                                  <p className="text-sm font-medium truncate">{pet.name}</p>
-                                  <p className="text-xs text-muted-foreground truncate">{pet.owner} • {pet.breed}</p>
-                                </div>
-                              </div>
-                            ))
-                          ) : !isPetSearching ? (
-                            <div className="p-2 text-xs text-muted-foreground text-center">
-                              No pets found
-                            </div>
-                          ) : null}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Date & Groomer Info */}
+                {/* Date & Groomer Info - Shared between modes */}
                 <div className="flex items-center gap-4 text-sm">
                   <div className="flex items-center gap-1.5 text-muted-foreground">
                     <Calendar className="h-4 w-4" />
@@ -677,99 +765,226 @@ export function AppointmentsCalendar({
                   </div>
                 </div>
 
-                {/* Time Inputs */}
+                {/* Time Pickers - Shared between modes */}
                 <div className="flex items-center gap-2">
                   <div className="flex-1 space-y-1">
                     <label className="text-xs font-medium text-muted-foreground">Start</label>
-                    <div className="relative">
-                      <Clock className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        value={startTimeInput}
-                        onChange={(e) => setStartTimeInput(e.target.value)}
-                        placeholder="9:00 AM"
-                        className="pl-9 h-9"
-                      />
-                    </div>
+                    <Input
+                      type="time"
+                      value={to24HourFormat(startTimeInput)}
+                      onChange={(e) => {
+                        const time12h = to12HourFormat(e.target.value)
+                        setStartTimeInput(time12h)
+                        // Update end time if service is selected
+                        if (selectedService && e.target.value) {
+                          const startMinutes = parseTimeToMinutes(time12h)
+                          const newEndMinutes = startMinutes + selectedService.duration_minutes
+                          setEndTimeInput(formatMinutesToTimeString(newEndMinutes))
+                        }
+                      }}
+                      className="bg-background h-9 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+                    />
                   </div>
                   <span className="text-muted-foreground mt-5">-</span>
                   <div className="flex-1 space-y-1">
                     <label className="text-xs font-medium text-muted-foreground">End</label>
-                    <div className="relative">
-                      <Clock className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        value={endTimeInput}
-                        onChange={(e) => setEndTimeInput(e.target.value)}
-                        placeholder="10:00 AM"
-                        className="pl-9 h-9"
-                      />
-                    </div>
+                    <Input
+                      type="time"
+                      value={to24HourFormat(endTimeInput)}
+                      onChange={(e) => setEndTimeInput(to12HourFormat(e.target.value))}
+                      className="bg-background h-9 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+                    />
                   </div>
                 </div>
 
-                {/* Service Search */}
-                <div className="space-y-2">
-                  <label className="text-xs font-medium text-muted-foreground">Service</label>
-                  {selectedService ? (
-                    <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-md">
-                      <Scissors className="h-4 w-4 text-primary" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{selectedService.name}</p>
-                        <p className="text-xs text-muted-foreground">{selectedService.duration_minutes} min • ${selectedService.price}</p>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 shrink-0"
-                        onClick={() => setSelectedService(null)}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="relative" ref={serviceInputContainerRef}>
-                      <div className="relative">
-                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input
-                          placeholder="Search for a service..."
-                          value={serviceSearchQuery}
-                          onChange={(e) => {
-                            setServiceSearchQuery(e.target.value)
-                            setShowServiceDropdown(true)
-                          }}
-                          onFocus={handleServiceInputFocus}
-                          onBlur={() => setTimeout(() => setShowServiceDropdown(false), 200)}
-                          className="pl-9 h-9"
-                        />
-                      </div>
-                      {showServiceDropdown && (
-                        <div className={cn(
-                          "absolute left-0 right-0 bg-white border rounded-md shadow-lg z-50 max-h-40 overflow-auto",
-                          serviceDropdownDirection === 'up' ? "bottom-full mb-1" : "top-full mt-1"
-                        )}>
-                          {filteredServices.length > 0 ? (
-                            filteredServices.map((service) => (
-                              <div
-                                key={service.id}
-                                className="flex items-center gap-2 p-2 hover:bg-accent cursor-pointer"
-                                onMouseDown={() => handleSelectService(service)}
-                              >
-                                <Scissors className="h-4 w-4 text-primary shrink-0" />
-                                <div className="min-w-0">
-                                  <p className="text-sm font-medium truncate">{service.name}</p>
-                                  <p className="text-xs text-muted-foreground">{service.duration_minutes} min • ${service.price}</p>
+                {/* Appointment Mode Content */}
+                {bookingMode === 'appointment' && (
+                  <>
+                    {/* Pet Search */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-muted-foreground">Pet</label>
+                      {selectedPet ? (
+                        <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-md">
+                          <Dog className="h-4 w-4 text-primary" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{selectedPet.name}</p>
+                            <p className="text-xs text-muted-foreground truncate">{selectedPet.owner} • {selectedPet.breed}</p>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 shrink-0"
+                            onClick={() => setSelectedPet(null)}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="relative">
+                          <div className="relative">
+                            {isPetSearching ? (
+                              <Loader2 className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground animate-spin" />
+                            ) : (
+                              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                            )}
+                            <Input
+                              placeholder="Search for a pet..."
+                              value={petSearchQuery}
+                              onChange={(e) => {
+                                setPetSearchQuery(e.target.value)
+                                setShowPetDropdown(true)
+                              }}
+                              onFocus={() => setShowPetDropdown(true)}
+                              onBlur={() => setTimeout(() => setShowPetDropdown(false), 200)}
+                              className="pl-9 h-9"
+                            />
+                          </div>
+                          {showPetDropdown && petSearchQuery.trim() && (
+                            <div className="absolute top-full left-0 right-0 mt-1 bg-white border rounded-md shadow-lg z-50 max-h-40 overflow-auto">
+                              {petSearchResults.length > 0 ? (
+                                petSearchResults.map((pet) => (
+                                  <div
+                                    key={pet.id}
+                                    className="flex items-center gap-2 p-2 hover:bg-accent cursor-pointer"
+                                    onMouseDown={() => handleSelectPet(pet)}
+                                  >
+                                    <Dog className="h-4 w-4 text-primary shrink-0" />
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-medium truncate">{pet.name}</p>
+                                      <p className="text-xs text-muted-foreground truncate">{pet.owner} • {pet.breed}</p>
+                                    </div>
+                                  </div>
+                                ))
+                              ) : !isPetSearching ? (
+                                <div className="p-2 text-xs text-muted-foreground text-center">
+                                  No pets found
                                 </div>
-                              </div>
-                            ))
-                          ) : (
-                            <div className="p-2 text-xs text-muted-foreground text-center">
-                              No services found
+                              ) : null}
                             </div>
                           )}
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
+
+                    {/* Service Search */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-muted-foreground">Service</label>
+                      {selectedService ? (
+                        <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-md">
+                          <Scissors className="h-4 w-4 text-primary" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{selectedService.name}</p>
+                            <p className="text-xs text-muted-foreground">{selectedService.duration_minutes} min • ${selectedService.price}</p>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 shrink-0"
+                            onClick={() => setSelectedService(null)}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="relative" ref={serviceInputContainerRef}>
+                          <div className="relative">
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                            <Input
+                              placeholder="Search for a service..."
+                              value={serviceSearchQuery}
+                              onChange={(e) => {
+                                setServiceSearchQuery(e.target.value)
+                                setShowServiceDropdown(true)
+                              }}
+                              onFocus={handleServiceInputFocus}
+                              onBlur={() => setTimeout(() => setShowServiceDropdown(false), 200)}
+                              className="pl-9 h-9"
+                            />
+                          </div>
+                          {showServiceDropdown && (
+                            <div className={cn(
+                              "absolute left-0 right-0 bg-white border rounded-md shadow-lg z-50 max-h-40 overflow-auto",
+                              serviceDropdownDirection === 'up' ? "bottom-full mb-1" : "top-full mt-1"
+                            )}>
+                              {filteredServices.length > 0 ? (
+                                filteredServices.map((service) => (
+                                  <div
+                                    key={service.id}
+                                    className="flex items-center gap-2 p-2 hover:bg-accent cursor-pointer"
+                                    onMouseDown={() => handleSelectService(service)}
+                                  >
+                                    <Scissors className="h-4 w-4 text-primary shrink-0" />
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-medium truncate">{service.name}</p>
+                                      <p className="text-xs text-muted-foreground">{service.duration_minutes} min • ${service.price}</p>
+                                    </div>
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="p-2 text-xs text-muted-foreground text-center">
+                                  No services found
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {/* Block Mode Content */}
+                {bookingMode === 'block' && (
+                  <>
+                    {/* Block Reason Dropdown */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-muted-foreground">Reason</label>
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setShowBlockReasonDropdown(!showBlockReasonDropdown)}
+                          className="flex items-center justify-between w-full h-9 px-3 py-2 text-sm bg-white border rounded-md hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                        >
+                          <span className={blockReason ? 'text-foreground' : 'text-muted-foreground'}>
+                            {blockReason ? BLOCK_REASONS.find(r => r.id === blockReason)?.label : 'Select a reason...'}
+                          </span>
+                          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                        {showBlockReasonDropdown && (
+                          <div className="absolute top-full left-0 right-0 mt-1 bg-white border rounded-md shadow-lg z-50 max-h-48 overflow-auto">
+                            {BLOCK_REASONS.map((reason) => (
+                              <div
+                                key={reason.id}
+                                className={cn(
+                                  "flex items-center gap-2 p-2 hover:bg-accent cursor-pointer",
+                                  blockReason === reason.id && "bg-accent"
+                                )}
+                                onMouseDown={() => {
+                                  setBlockReason(reason.id)
+                                  setShowBlockReasonDropdown(false)
+                                }}
+                              >
+                                <Ban className="h-4 w-4 text-muted-foreground shrink-0" />
+                                <span className="text-sm">{reason.label}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Block Description */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-muted-foreground">Description (optional)</label>
+                      <Textarea
+                        placeholder="Add any additional notes..."
+                        value={blockDescription}
+                        onChange={(e) => setBlockDescription(e.target.value)}
+                        className="min-h-[80px] resize-none"
+                      />
+                    </div>
+                  </>
+                )}
 
                 {/* Action Buttons */}
                 <div className="flex gap-2 pt-2">
@@ -780,9 +995,11 @@ export function AppointmentsCalendar({
                     size="sm"
                     className="flex-1"
                     onClick={handleConfirmBooking}
-                    disabled={!canConfirmBooking}
+                    disabled={bookingMode === 'appointment' ? !canConfirmBooking : !blockReason}
                   >
-                    Confirm
+                    {bookingMode === 'appointment'
+                      ? (isEditMode ? 'Update' : 'Confirm')
+                      : 'Block Time'}
                   </Button>
                 </div>
               </div>
@@ -991,7 +1208,10 @@ export function AppointmentsCalendar({
                                   status={appointment.status}
                                   onClick={(e) => {
                                     e?.stopPropagation() // Prevent slot click when clicking appointment
-                                    handleAppointmentClick(appointment, overlappingAppts)
+                                    const rect = e?.currentTarget.getBoundingClientRect()
+                                    if (rect) {
+                                      handleAppointmentClick(appointment, overlappingAppts, rect)
+                                    }
                                   }}
                                   className="absolute"
                                   style={{

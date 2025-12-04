@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ChevronLeft, ChevronRight, Loader2, Calendar, CalendarDays, Search, Dog } from "lucide-react"
 import { AppointmentsCalendar, type Appointment, type CalendarDate, type CalendarGroomer, type CalendarPet, type CalendarService } from "@/components/AppointmentsCalendar"
-import { appointmentService, type DailyAppointmentsResponse } from "@/services/appointmentService"
+import { appointmentService, type DailyAppointmentsResponse, type CreateAppointmentRequest } from "@/services/appointmentService"
 import { petService, type PetSearchResult } from "@/services/petService"
 import { serviceService } from "@/services/serviceService"
 import type { Service } from "@/types/service"
@@ -209,8 +209,10 @@ export default function Appointments() {
                 id: appt.id,
                 time: appt.time,
                 endTime: appt.end_time,
+                petId: appt.pet_id,
                 petName: appt.pet_name,
                 owner: appt.owner,
+                serviceId: appt.service_id ?? undefined,
                 service: appt.service,
                 groomer: appt.groomer,
                 groomerId: appt.groomer_id,
@@ -362,8 +364,26 @@ export default function Appointments() {
     }))
   }
 
+  // Helper to parse time string (e.g., "9:00 AM") to hours and minutes
+  const parseTimeString = (timeStr: string): { hours: number; minutes: number } => {
+    const [time, period] = timeStr.split(' ')
+    let [hours, minutes] = time.includes(':') ? time.split(':').map(Number) : [Number(time), 0]
+    if (period === 'PM' && hours !== 12) hours += 12
+    if (period === 'AM' && hours === 12) hours = 0
+    return { hours, minutes }
+  }
+
+  // Helper to calculate duration in minutes from start and end time strings
+  const calculateDurationMinutes = (startTime: string, endTime: string): number => {
+    const start = parseTimeString(startTime)
+    const end = parseTimeString(endTime)
+    const startMinutes = start.hours * 60 + start.minutes
+    const endMinutes = end.hours * 60 + end.minutes
+    return endMinutes - startMinutes
+  }
+
   // Booking confirmation handler
-  const handleBookingConfirm = (booking: {
+  const handleBookingConfirm = async (booking: {
     petId: number
     petName: string
     groomerId: number
@@ -374,9 +394,84 @@ export default function Appointments() {
     startTime: string
     endTime: string
   }) => {
-    const dateStr = booking.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-    // TODO: Call API to create appointment
-    alert(`Booking confirmed!\n\nPet: ${booking.petName}\nGroomer: ${booking.groomerName}\nService: ${booking.serviceName}\nDate: ${dateStr}\nTime: ${booking.startTime} - ${booking.endTime}`)
+    try {
+      // Build the appointment datetime
+      const { hours, minutes } = parseTimeString(booking.startTime)
+      const appointmentDatetime = new Date(booking.date)
+      appointmentDatetime.setHours(hours, minutes, 0, 0)
+
+      // Calculate duration from start and end times
+      const durationMinutes = calculateDurationMinutes(booking.startTime, booking.endTime)
+
+      const request: CreateAppointmentRequest = {
+        pet_id: booking.petId,
+        staff_id: booking.groomerId,
+        service_ids: [booking.serviceId],
+        appointment_datetime: appointmentDatetime.toISOString(),
+        duration_minutes: durationMinutes,
+      }
+
+      const response = await appointmentService.createAppointment(request)
+
+      // Add the new appointment to local state (optimistic update without full reload)
+      const newAppointment: Appointment = {
+        id: response.id,
+        time: booking.startTime,
+        endTime: booking.endTime,
+        petId: response.pet_id,
+        petName: response.pet_name,
+        owner: response.customer_name,
+        serviceId: booking.serviceId,
+        service: booking.serviceName,
+        groomer: response.staff_name,
+        groomerId: response.staff_id,
+        date: formatDateToISO(booking.date),
+        tags: [],
+        status: response.status ?? undefined,
+      }
+
+      setAppointments(prev => [...prev, newAppointment])
+    } catch (err) {
+      console.error('Failed to create appointment:', err)
+      alert('Failed to create appointment. Please try again.')
+    }
+  }
+
+  // Appointment update handler
+  const handleAppointmentUpdate = async (appointmentId: number, booking: {
+    petId: number
+    petName: string
+    groomerId: number
+    groomerName: string
+    serviceId: number
+    serviceName: string
+    date: Date
+    startTime: string
+    endTime: string
+  }) => {
+    // TODO: Implement update API call
+    // For now, just update the local state optimistically
+    const durationMinutes = calculateDurationMinutes(booking.startTime, booking.endTime)
+
+    setAppointments(prev => prev.map(appt => {
+      if (appt.id === appointmentId) {
+        return {
+          ...appt,
+          time: booking.startTime,
+          endTime: booking.endTime,
+          petId: booking.petId,
+          petName: booking.petName,
+          serviceId: booking.serviceId,
+          service: booking.serviceName,
+          groomer: booking.groomerName,
+          groomerId: booking.groomerId,
+          date: formatDateToISO(booking.date),
+        }
+      }
+      return appt
+    }))
+
+    console.log('Appointment updated (local only):', { appointmentId, booking, durationMinutes })
   }
 
   if (isLoadingPet) {
@@ -626,6 +721,7 @@ export default function Appointments() {
                 onPetSearch={handlePetSearch}
                 services={services}
                 onBookingConfirm={handleBookingConfirm}
+                onAppointmentUpdate={handleAppointmentUpdate}
               />
             )}
           </div>

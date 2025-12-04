@@ -17,9 +17,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ChevronLeft, ChevronRight, Loader2, Calendar, CalendarDays, Search, Dog } from "lucide-react"
-import { AppointmentsCalendar, type Appointment, type CalendarDate, type CalendarGroomer } from "@/components/AppointmentsCalendar"
+import { AppointmentsCalendar, type Appointment, type CalendarDate, type CalendarGroomer, type CalendarPet, type CalendarService } from "@/components/AppointmentsCalendar"
 import { appointmentService, type DailyAppointmentsResponse } from "@/services/appointmentService"
 import { petService, type PetSearchResult } from "@/services/petService"
+import { serviceService } from "@/services/serviceService"
+import type { Service } from "@/types/service"
 
 type ViewMode = 'day' | 'week'
 
@@ -82,6 +84,7 @@ export default function Appointments() {
   const [selectedGroomerIds, setSelectedGroomerIds] = useState<Set<number>>(new Set())
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [services, setServices] = useState<CalendarService[]>([])
 
   // Pet selection state
   const [selectedPet, setSelectedPet] = useState<SelectedPet | null>(null)
@@ -233,6 +236,24 @@ export default function Appointments() {
     fetchAppointments()
   }, [currentDate, viewMode, selectedPet])
 
+  // Fetch services on mount
+  useEffect(() => {
+    const fetchServices = async () => {
+      try {
+        const serviceList = await serviceService.getServices()
+        setServices(serviceList.map((s: Service) => ({
+          id: s.id,
+          name: s.name,
+          duration_minutes: s.duration_minutes,
+          price: s.price
+        })))
+      } catch (err) {
+        console.error('Failed to fetch services:', err)
+      }
+    }
+    fetchServices()
+  }, [])
+
   // Generate calendar dates based on view mode
   const calendarDates: CalendarDate[] = (() => {
     const today = new Date()
@@ -329,11 +350,33 @@ export default function Appointments() {
     alert(`Clicked on ${appointment.petName} - ${appointment.service}`)
   }
 
-  const handleSlotSelect = (_groomerId: number, groomerName: string, date: Date, startTime: string, endTime: string) => {
-    if (!selectedPet) return
-    const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-    // TODO: Open booking modal or navigate to booking form
-    alert(`Book ${selectedPet.name} with ${groomerName} on ${dateStr} from ${startTime} to ${endTime}`)
+  // Pet search handler for the calendar popover
+  const handlePetSearch = async (query: string): Promise<CalendarPet[]> => {
+    if (!query.trim()) return []
+    const results = await petService.searchPets(query)
+    return results.map((r: PetSearchResult) => ({
+      id: r.pet_id,
+      name: r.pet_name,
+      owner: r.family_name,
+      breed: r.breed || r.species
+    }))
+  }
+
+  // Booking confirmation handler
+  const handleBookingConfirm = (booking: {
+    petId: number
+    petName: string
+    groomerId: number
+    groomerName: string
+    serviceId: number
+    serviceName: string
+    date: Date
+    startTime: string
+    endTime: string
+  }) => {
+    const dateStr = booking.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    // TODO: Call API to create appointment
+    alert(`Booking confirmed!\n\nPet: ${booking.petName}\nGroomer: ${booking.groomerName}\nService: ${booking.serviceName}\nDate: ${dateStr}\nTime: ${booking.startTime} - ${booking.endTime}`)
   }
 
   if (isLoadingPet) {
@@ -574,7 +617,15 @@ export default function Appointments() {
                 dates={calendarDates}
                 viewMode={viewMode}
                 onAppointmentClick={handleAppointmentClick}
-                onSlotSelect={selectedPet ? handleSlotSelect : undefined}
+                preSelectedPet={selectedPet ? {
+                  id: parseInt(selectedPet.id),
+                  name: selectedPet.name,
+                  owner: selectedPet.owner,
+                  breed: selectedPet.breed
+                } : undefined}
+                onPetSearch={handlePetSearch}
+                services={services}
+                onBookingConfirm={handleBookingConfirm}
               />
             )}
           </div>

@@ -1,10 +1,11 @@
-import React, { useRef, useState, useCallback } from "react"
+import React, { useRef, useState, useCallback, useEffect } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverAnchor } from "@/components/ui/popover"
-import { AppointmentCard, AppointmentStatus } from "@/components/AppointmentCard"
+import { AppointmentCard, type AppointmentStatus } from "@/components/AppointmentCard"
 import { cn } from "@/lib/utils"
-import { Calendar, Clock, X } from "lucide-react"
+import { Calendar, Clock, X, Search, Dog, Loader2, Scissors } from "lucide-react"
 
 export interface Appointment {
   id: number
@@ -32,6 +33,22 @@ export interface CalendarGroomer {
   name: string
 }
 
+// Pet type for the booking popover
+export interface CalendarPet {
+  id: number
+  name: string
+  owner: string
+  breed: string
+}
+
+// Service type for the booking popover
+export interface CalendarService {
+  id: number
+  name: string
+  duration_minutes: number
+  price: number
+}
+
 // Selection state for the slot being created
 interface SlotSelection {
   groomerId: number
@@ -50,7 +67,24 @@ interface AppointmentsCalendarProps {
   dates: CalendarDate[]
   viewMode?: 'day' | 'week'
   onAppointmentClick?: (appointment: Appointment) => void
-  onSlotSelect?: (groomerId: number, groomerName: string, date: Date, startTime: string, endTime: string) => void
+  // Pre-selected pet (from parent page)
+  preSelectedPet?: CalendarPet | null
+  // Pet search functionality
+  onPetSearch?: (query: string) => Promise<CalendarPet[]>
+  // Services list for selection
+  services?: CalendarService[]
+  // Callback when booking is confirmed
+  onBookingConfirm?: (booking: {
+    petId: number
+    petName: string
+    groomerId: number
+    groomerName: string
+    serviceId: number
+    serviceName: string
+    date: Date
+    startTime: string
+    endTime: string
+  }) => void
 }
 
 export function AppointmentsCalendar({
@@ -59,7 +93,10 @@ export function AppointmentsCalendar({
   dates,
   viewMode = 'day',
   onAppointmentClick,
-  onSlotSelect
+  preSelectedPet,
+  onPetSearch,
+  services = [],
+  onBookingConfirm
 }: AppointmentsCalendarProps) {
   const [activeAppointmentId, setActiveAppointmentId] = useState<number | null>(null)
   const [selection, setSelection] = useState<SlotSelection | null>(null)
@@ -67,10 +104,24 @@ export function AppointmentsCalendar({
   const [dragStart, setDragStart] = useState<{ groomerId: number; groomerName: string; date: Date; dateStr: string; minutes: number; y: number } | null>(null)
   const [popoverOpen, setPopoverOpen] = useState(false)
 
+  // Popover form state
+  const [selectedPet, setSelectedPet] = useState<CalendarPet | null>(null)
+  const [petSearchQuery, setPetSearchQuery] = useState("")
+  const [petSearchResults, setPetSearchResults] = useState<CalendarPet[]>([])
+  const [isPetSearching, setIsPetSearching] = useState(false)
+  const [showPetDropdown, setShowPetDropdown] = useState(false)
+  const [selectedService, setSelectedService] = useState<CalendarService | null>(null)
+  const [serviceSearchQuery, setServiceSearchQuery] = useState("")
+  const [showServiceDropdown, setShowServiceDropdown] = useState(false)
+  const [serviceDropdownDirection, setServiceDropdownDirection] = useState<'up' | 'down'>('down')
+  const [startTimeInput, setStartTimeInput] = useState("")
+  const [endTimeInput, setEndTimeInput] = useState("")
+
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const timeColumnRef = useRef<HTMLDivElement>(null)
   const headerScrollRef = useRef<HTMLDivElement>(null)
   const calendarBodyRef = useRef<HTMLDivElement>(null)
+  const serviceInputContainerRef = useRef<HTMLDivElement>(null)
 
   // Sync scroll between time column (vertical) and header (horizontal)
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -223,15 +274,6 @@ export function AppointmentsCalendar({
   const getGroomerDateAppointmentCount = (groomerId: number, dateStr: string) => {
     return appointments.filter(apt => apt.groomerId === groomerId && apt.date === dateStr).length
   }
-
-  // Calculate minutes from Y position within the calendar body
-  const getMinutesFromY = useCallback((y: number, slotElement: HTMLElement): number => {
-    const rect = slotElement.getBoundingClientRect()
-    const relativeY = y - rect.top
-    const slotIndex = Math.floor(relativeY / 100) // Each slot is 100px
-    const minutesIntoSlot = Math.round(((relativeY % 100) / 100) * 60 / 15) * 15 // Snap to 15-min intervals
-    return (startHour + slotIndex) * 60 + minutesIntoSlot
-  }, [startHour])
 
   // Handle mouse down on a slot cell
   const handleSlotMouseDown = (
@@ -387,25 +429,117 @@ export function AppointmentsCalendar({
     }
   }, [dragStart, handleMouseMove, handleMouseUp])
 
+  // Set pre-selected pet when popover opens
+  useEffect(() => {
+    if (popoverOpen && preSelectedPet && !selectedPet) {
+      setSelectedPet(preSelectedPet)
+    }
+  }, [popoverOpen, preSelectedPet])
+
+  // Debounced pet search
+  useEffect(() => {
+    if (!petSearchQuery.trim() || !onPetSearch) {
+      setPetSearchResults([])
+      setIsPetSearching(false)
+      return
+    }
+
+    setIsPetSearching(true)
+    const timeoutId = setTimeout(async () => {
+      try {
+        const results = await onPetSearch(petSearchQuery)
+        setPetSearchResults(results)
+      } catch (error) {
+        console.error("Error searching pets:", error)
+        setPetSearchResults([])
+      } finally {
+        setIsPetSearching(false)
+      }
+    }, 300)
+
+    return () => clearTimeout(timeoutId)
+  }, [petSearchQuery, onPetSearch])
+
+  // Sync time inputs when selection changes
+  useEffect(() => {
+    if (selection) {
+      setStartTimeInput(formatMinutesToTimeString(selection.startMinutes))
+      setEndTimeInput(formatMinutesToTimeString(selection.endMinutes))
+    }
+  }, [selection?.startMinutes, selection?.endMinutes])
+
   // Close popover and clear selection
   const handleClosePopover = () => {
     setPopoverOpen(false)
     setSelection(null)
+    // Reset form state
+    setSelectedPet(null)
+    setPetSearchQuery("")
+    setPetSearchResults([])
+    setSelectedService(null)
+    setServiceSearchQuery("")
+    setStartTimeInput("")
+    setEndTimeInput("")
   }
+
+  // Handle pet selection
+  const handleSelectPet = (pet: CalendarPet) => {
+    setSelectedPet(pet)
+    setPetSearchQuery("")
+    setShowPetDropdown(false)
+  }
+
+  // Handle service selection
+  const handleSelectService = (service: CalendarService) => {
+    setSelectedService(service)
+    setServiceSearchQuery("")
+    setShowServiceDropdown(false)
+  }
+
+  // Handle service input focus - determine dropdown direction based on available space
+  const handleServiceInputFocus = () => {
+    setShowServiceDropdown(true)
+
+    if (serviceInputContainerRef.current) {
+      const rect = serviceInputContainerRef.current.getBoundingClientRect()
+      const viewportHeight = window.innerHeight
+      const spaceBelow = viewportHeight - rect.bottom
+      const dropdownHeight = 160 // max-h-40 = 10rem = 160px
+
+      // Open downward by default, only open upward if not enough space below
+      if (spaceBelow < dropdownHeight + 10) {
+        setServiceDropdownDirection('up')
+      } else {
+        setServiceDropdownDirection('down')
+      }
+    }
+  }
+
+  // Filter services based on search query
+  const filteredServices = services.filter(s =>
+    s.name.toLowerCase().includes(serviceSearchQuery.toLowerCase())
+  )
 
   // Handle booking confirmation
   const handleConfirmBooking = () => {
-    if (selection && onSlotSelect) {
-      onSlotSelect(
-        selection.groomerId,
-        selection.groomerName,
-        selection.date,
-        formatMinutesToTimeString(selection.startMinutes),
-        formatMinutesToTimeString(selection.endMinutes)
-      )
-    }
+    if (!selection || !selectedPet || !selectedService || !onBookingConfirm) return
+
+    onBookingConfirm({
+      petId: selectedPet.id,
+      petName: selectedPet.name,
+      groomerId: selection.groomerId,
+      groomerName: selection.groomerName,
+      serviceId: selectedService.id,
+      serviceName: selectedService.name,
+      date: selection.date,
+      startTime: startTimeInput,
+      endTime: endTimeInput
+    })
     handleClosePopover()
   }
+
+  // Check if booking can be confirmed
+  const canConfirmBooking = selectedPet && selectedService && startTimeInput && endTimeInput
 
   const totalColumns = dates.length * groomers.length
   const columnWidth = 150
@@ -446,50 +580,213 @@ export function AppointmentsCalendar({
         />
         <PopoverContent
           side="right"
-          align="start"
-          className="w-72 p-0"
+          align="end"
+          className="w-80 p-0"
           onInteractOutside={handleClosePopover}
         >
           <div className="p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h4 className="font-semibold text-sm">Ready to Book</h4>
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="font-semibold">Book Appointment</h4>
               <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleClosePopover}>
                 <X className="h-4 w-4" />
               </Button>
             </div>
 
             {selection && (
-              <div className="space-y-2 text-sm">
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Calendar className="h-4 w-4" />
-                  <span>
-                    {selection.date.toLocaleDateString('en-US', {
-                      weekday: 'short',
-                      month: 'short',
-                      day: 'numeric'
-                    })}
-                  </span>
+              <div className="space-y-4">
+                {/* Pet Search */}
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-muted-foreground">Pet</label>
+                  {selectedPet ? (
+                    <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-md">
+                      <Dog className="h-4 w-4 text-primary" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{selectedPet.name}</p>
+                        <p className="text-xs text-muted-foreground truncate">{selectedPet.owner} • {selectedPet.breed}</p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0"
+                        onClick={() => setSelectedPet(null)}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <div className="relative">
+                        {isPetSearching ? (
+                          <Loader2 className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground animate-spin" />
+                        ) : (
+                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        )}
+                        <Input
+                          placeholder="Search for a pet..."
+                          value={petSearchQuery}
+                          onChange={(e) => {
+                            setPetSearchQuery(e.target.value)
+                            setShowPetDropdown(true)
+                          }}
+                          onFocus={() => setShowPetDropdown(true)}
+                          onBlur={() => setTimeout(() => setShowPetDropdown(false), 200)}
+                          className="pl-9 h-9"
+                        />
+                      </div>
+                      {showPetDropdown && petSearchQuery.trim() && (
+                        <div className="absolute top-full left-0 right-0 mt-1 bg-white border rounded-md shadow-lg z-50 max-h-40 overflow-auto">
+                          {petSearchResults.length > 0 ? (
+                            petSearchResults.map((pet) => (
+                              <div
+                                key={pet.id}
+                                className="flex items-center gap-2 p-2 hover:bg-accent cursor-pointer"
+                                onMouseDown={() => handleSelectPet(pet)}
+                              >
+                                <Dog className="h-4 w-4 text-primary shrink-0" />
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium truncate">{pet.name}</p>
+                                  <p className="text-xs text-muted-foreground truncate">{pet.owner} • {pet.breed}</p>
+                                </div>
+                              </div>
+                            ))
+                          ) : !isPetSearching ? (
+                            <div className="p-2 text-xs text-muted-foreground text-center">
+                              No pets found
+                            </div>
+                          ) : null}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Clock className="h-4 w-4" />
-                  <span>
-                    {formatMinutesToTimeString(selection.startMinutes)} - {formatMinutesToTimeString(selection.endMinutes)}
-                  </span>
+
+                {/* Date & Groomer Info */}
+                <div className="flex items-center gap-4 text-sm">
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <Calendar className="h-4 w-4" />
+                    <span>
+                      {selection.date.toLocaleDateString('en-US', {
+                        weekday: 'short',
+                        month: 'short',
+                        day: 'numeric'
+                      })}
+                    </span>
+                  </div>
+                  <div className="text-muted-foreground">
+                    with <span className="font-medium text-foreground">{selection.groomerName}</span>
+                  </div>
                 </div>
-                <div className="text-muted-foreground">
-                  <span className="font-medium text-foreground">{selection.groomerName}</span>
+
+                {/* Time Inputs */}
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">Start</label>
+                    <div className="relative">
+                      <Clock className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        value={startTimeInput}
+                        onChange={(e) => setStartTimeInput(e.target.value)}
+                        placeholder="9:00 AM"
+                        className="pl-9 h-9"
+                      />
+                    </div>
+                  </div>
+                  <span className="text-muted-foreground mt-5">-</span>
+                  <div className="flex-1 space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">End</label>
+                    <div className="relative">
+                      <Clock className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        value={endTimeInput}
+                        onChange={(e) => setEndTimeInput(e.target.value)}
+                        placeholder="10:00 AM"
+                        className="pl-9 h-9"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Service Search */}
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-muted-foreground">Service</label>
+                  {selectedService ? (
+                    <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-md">
+                      <Scissors className="h-4 w-4 text-primary" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{selectedService.name}</p>
+                        <p className="text-xs text-muted-foreground">{selectedService.duration_minutes} min • ${selectedService.price}</p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0"
+                        onClick={() => setSelectedService(null)}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="relative" ref={serviceInputContainerRef}>
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          placeholder="Search for a service..."
+                          value={serviceSearchQuery}
+                          onChange={(e) => {
+                            setServiceSearchQuery(e.target.value)
+                            setShowServiceDropdown(true)
+                          }}
+                          onFocus={handleServiceInputFocus}
+                          onBlur={() => setTimeout(() => setShowServiceDropdown(false), 200)}
+                          className="pl-9 h-9"
+                        />
+                      </div>
+                      {showServiceDropdown && (
+                        <div className={cn(
+                          "absolute left-0 right-0 bg-white border rounded-md shadow-lg z-50 max-h-40 overflow-auto",
+                          serviceDropdownDirection === 'up' ? "bottom-full mb-1" : "top-full mt-1"
+                        )}>
+                          {filteredServices.length > 0 ? (
+                            filteredServices.map((service) => (
+                              <div
+                                key={service.id}
+                                className="flex items-center gap-2 p-2 hover:bg-accent cursor-pointer"
+                                onMouseDown={() => handleSelectService(service)}
+                              >
+                                <Scissors className="h-4 w-4 text-primary shrink-0" />
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium truncate">{service.name}</p>
+                                  <p className="text-xs text-muted-foreground">{service.duration_minutes} min • ${service.price}</p>
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="p-2 text-xs text-muted-foreground text-center">
+                              No services found
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-2 pt-2">
+                  <Button variant="outline" size="sm" className="flex-1" onClick={handleClosePopover}>
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="flex-1"
+                    onClick={handleConfirmBooking}
+                    disabled={!canConfirmBooking}
+                  >
+                    Confirm
+                  </Button>
                 </div>
               </div>
             )}
-
-            <div className="flex gap-2 mt-4">
-              <Button variant="outline" size="sm" className="flex-1" onClick={handleClosePopover}>
-                Cancel
-              </Button>
-              <Button size="sm" className="flex-1" onClick={handleConfirmBooking}>
-                Book
-              </Button>
-            </div>
           </div>
         </PopoverContent>
       </Popover>
@@ -612,7 +909,7 @@ export function AppointmentsCalendar({
                     )}
 
                     {/* Render time slots within this column */}
-                    {timeSlots.map((timeSlot, timeIndex) => {
+                    {timeSlots.map((timeSlot) => {
                       const appointmentsInSlot = getAppointmentsAtSlot(groomer.id, calDate.dateStr, timeSlot)
                       const occupied = appointmentsInSlot.length === 0 && isSlotOccupied(groomer.id, calDate.dateStr, timeSlot)
 
@@ -626,7 +923,7 @@ export function AppointmentsCalendar({
                             calDate.isToday ? "bg-primary/5" : "bg-gray-50"
                           )}
                           onMouseDown={(e) => {
-                            // Allow clicking if slot is empty OR if clicking before the first appointment in slot
+                            // Allow clicking if the specific clicked position doesn't have an appointment
                             const slotMinutes = parseTimeToMinutes(timeSlot)
                             const rect = e.currentTarget.getBoundingClientRect()
                             const relativeY = e.clientY - rect.top
@@ -641,7 +938,7 @@ export function AppointmentsCalendar({
                               return clickedMinutes >= aptStart && clickedMinutes < aptEnd
                             })
 
-                            if (!hasAppointmentAtClick && !occupied) {
+                            if (!hasAppointmentAtClick) {
                               handleSlotMouseDown(e, groomer.id, groomer.name, calDate, timeSlot, false)
                             }
                           }}

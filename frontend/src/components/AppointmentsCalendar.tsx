@@ -167,14 +167,15 @@ export function AppointmentsCalendar({
 
   // Total columns = time column + (groomers * dates)
   const totalColumns = dates.length * groomers.length
-  const gridTemplateColumns = `80px repeat(${totalColumns}, minmax(120px, 1fr))`
+  // Use fixed width columns to ensure proper sticky behavior during horizontal scroll
+  const gridTemplateColumns = `80px repeat(${totalColumns}, 150px)`
 
   return (
     <div className="border rounded-lg overflow-auto h-full">
       {/* Date Header Row */}
-      <div className="grid border-b bg-muted/30 sticky top-0 z-30" style={{ gridTemplateColumns }}>
+      <div className="grid border-b bg-muted/30 sticky top-0 z-[70]" style={{ gridTemplateColumns }}>
         {/* Empty cell for time column - sticky */}
-        <div className="border-r p-2 bg-muted/30 sticky left-0 z-40"></div>
+        <div className="border-r p-2 bg-muted/30 sticky left-0 z-[80]"></div>
         {/* Date headers spanning groomers */}
         {dates.map((calDate) => (
           <div
@@ -196,9 +197,9 @@ export function AppointmentsCalendar({
       </div>
 
       {/* Groomer Header Row */}
-      <div className="grid border-b bg-muted/50 sticky top-[41px] z-20" style={{ gridTemplateColumns }}>
+      <div className="grid border-b bg-muted/50 sticky top-[41px] z-[65]" style={{ gridTemplateColumns }}>
         {/* Empty cell for time column - sticky */}
-        <div className="border-r p-2 bg-muted/50 sticky left-0 z-40">
+        <div className="border-r p-2 bg-muted/50 sticky left-0 z-[80]">
           <span className="text-xs font-semibold text-muted-foreground">Time</span>
         </div>
         {/* Groomer headers for each date */}
@@ -230,7 +231,7 @@ export function AppointmentsCalendar({
         {timeSlots.map((timeSlot, timeIndex) => (
           <div key={timeIndex} className="grid border-b last:border-b-0 min-h-[100px]" style={{ gridTemplateColumns }}>
             {/* Time label - sticky */}
-            <div className="border-r py-2 px-2 text-xs text-muted-foreground font-medium flex items-start justify-end bg-white sticky left-0 z-10 min-w-[80px]">
+            <div className="border-r py-2 px-2 text-xs text-muted-foreground font-medium flex items-start justify-end bg-white sticky left-0 z-[60] min-w-[80px]">
               {timeSlot}
             </div>
             {/* Cells for each date/groomer combination */}

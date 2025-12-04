@@ -95,6 +95,24 @@ export interface AddCustomerUserRequest {
   phone?: string;
 }
 
+export interface AppointmentService {
+  name: string;
+  price: number;
+}
+
+export interface BookingHistoryItem {
+  id: number;
+  pet_name: string;
+  date: string;
+  end_time: string;
+  duration_minutes: number;
+  services: AppointmentService[];
+  tip: number;
+  amount: number;
+  has_note: boolean;
+  note?: string;
+}
+
 export const customerService = {
   /**
    * Get all customers for the current business
@@ -162,6 +180,18 @@ export const customerService = {
     return api.post<CustomerUser>(
       API_CONFIG.endpoints.customers.addUser(customerId),
       data,
+      {
+        requiresAuth: true,
+      }
+    );
+  },
+
+  /**
+   * Get booking history for a customer
+   */
+  getBookingHistory: async (customerId: number): Promise<BookingHistoryItem[]> => {
+    return api.get<BookingHistoryItem[]>(
+      API_CONFIG.endpoints.customers.bookingHistory(customerId),
       {
         requiresAuth: true,
       }

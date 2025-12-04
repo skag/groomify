@@ -19,6 +19,9 @@ class Pet(Base):
     business_id: Mapped[int] = mapped_column(
         ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    default_groomer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("business_users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     species: Mapped[str] = mapped_column(String(50), nullable=False)
     breed: Mapped[str | None] = mapped_column(String(100))
@@ -40,6 +43,9 @@ class Pet(Base):
     # Relationships
     customer: Mapped["Customer"] = relationship(back_populates="pets")
     business: Mapped["Business"] = relationship(back_populates="pets")
+    default_groomer: Mapped["BusinessUser | None"] = relationship(
+        foreign_keys=[default_groomer_id]
+    )
     appointments: Mapped[list["Appointment"]] = relationship(
         back_populates="pet", cascade="all, delete-orphan"
     )

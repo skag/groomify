@@ -1,6 +1,6 @@
 """Appointment schemas"""
 
-from datetime import datetime
+from datetime import datetime, date
 from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
@@ -38,7 +38,7 @@ class AppointmentBase(BaseModel):
         return getattr(value, "name", value)
 
     class Config:
-        allow_population_by_field_name = True
+        populate_by_name = True
 
 
 class AppointmentCreate(AppointmentBase):
@@ -60,7 +60,7 @@ class AppointmentUpdate(BaseModel):
     notes: str | None = None
 
     class Config:
-        allow_population_by_field_name = True
+        populate_by_name = True
 
 
 class Appointment(AppointmentBase):
@@ -76,4 +76,57 @@ class Appointment(AppointmentBase):
 
     class Config:
         from_attributes = True
-        allow_population_by_field_name = True
+        populate_by_name = True
+
+
+class AppointmentServiceSchema(BaseModel):
+    """Service included in an appointment"""
+
+    name: str
+    price: float = 0  # Placeholder - will come from future transaction table
+
+
+class CustomerAppointmentHistory(BaseModel):
+    """Appointment history item for customer detail page"""
+
+    id: int
+    pet_name: str
+    date: datetime
+    end_time: datetime
+    duration_minutes: int
+    services: list[AppointmentServiceSchema]
+    tip: float = 0  # Placeholder - will come from future transaction table
+    amount: float = 0  # Placeholder - will come from future transaction table
+    has_note: bool
+    note: str | None = None
+
+
+class DailyAppointmentItem(BaseModel):
+    """Single appointment for the daily calendar view"""
+
+    id: int
+    time: str  # Formatted as "9:00 AM"
+    end_time: str  # Formatted as "10:30 AM"
+    pet_name: str
+    owner: str  # Customer account_name
+    service: str  # Primary service name (first in list)
+    groomer: str  # Staff member full name
+    groomer_id: int
+    tags: list[str] = []  # Pet behavioral tags (empty for now)
+    status: StatusLiteral | None = None
+
+
+class GroomerWithAppointments(BaseModel):
+    """Groomer with their appointments for the day"""
+
+    id: int
+    name: str  # Full name (first_name + " " + last_name)
+    appointments: list[DailyAppointmentItem] = []
+
+
+class DailyAppointmentsResponse(BaseModel):
+    """Response for daily appointments endpoint"""
+
+    date: date
+    total_appointments: int
+    groomers: list[GroomerWithAppointments]

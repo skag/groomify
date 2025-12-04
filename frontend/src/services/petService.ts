@@ -25,6 +25,33 @@ export interface UpdatePetRequest {
   special_notes?: string
 }
 
+export interface PetSearchResult {
+  pet_id: number
+  pet_name: string
+  family_name: string
+  phone: string | null
+  customer_user_name: string
+  species: string
+  breed: string | null
+}
+
+export interface PetWithCustomer {
+  id: number
+  customer_id: number
+  business_id: number
+  name: string
+  species: string
+  breed: string | null
+  age: number | null
+  weight: number | null
+  special_notes: string | null
+  default_groomer_id: number | null
+  notes: Array<{ date: string; note: string; created_by_id: number }>
+  created_at: string
+  updated_at: string
+  account_name: string
+}
+
 export const petService = {
   /**
    * Get all pets for the business
@@ -47,10 +74,10 @@ export const petService = {
   },
 
   /**
-   * Get a single pet by ID
+   * Get a single pet by ID with customer information
    */
-  async getPetById(petId: number): Promise<Pet> {
-    return api.get<Pet>(
+  async getPetById(petId: number): Promise<PetWithCustomer> {
+    return api.get<PetWithCustomer>(
       API_CONFIG.endpoints.pets.get(petId),
       { requiresAuth: true }
     )
@@ -84,6 +111,19 @@ export const petService = {
   async deletePet(petId: number): Promise<Pet> {
     return api.delete<Pet>(
       API_CONFIG.endpoints.pets.delete(petId),
+      { requiresAuth: true }
+    )
+  },
+
+  /**
+   * Search pets by pet name, family name, phone number, or customer user name
+   */
+  async searchPets(query: string): Promise<PetSearchResult[]> {
+    if (!query.trim()) {
+      return []
+    }
+    return api.get<PetSearchResult[]>(
+      API_CONFIG.endpoints.pets.search(query),
       { requiresAuth: true }
     )
   },

@@ -15,6 +15,7 @@ class PetBase(BaseModel):
     age: int | None = None
     weight: float | None = None
     special_notes: str | None = None
+    default_groomer_id: int | None = None
 
 
 class PetCreate(PetBase):
@@ -44,6 +45,7 @@ class PetUpdate(BaseModel):
     age: int | None = None
     weight: float | None = None
     special_notes: str | None = None
+    default_groomer_id: int | None = None
 
 
 class Pet(PetBase):
@@ -64,6 +66,21 @@ class PetWithCustomer(Pet):
     """Schema for pet response with customer information"""
 
     account_name: str = ""  # Customer account name
+
+    class Config:
+        from_attributes = True
+
+
+class PetSearchResult(BaseModel):
+    """Schema for pet search results with denormalized display data"""
+
+    pet_id: int
+    pet_name: str
+    family_name: str  # customer.account_name
+    phone: str | None  # primary contact's phone
+    customer_user_name: str  # primary contact's full name
+    species: str
+    breed: str | None
 
     class Config:
         from_attributes = True

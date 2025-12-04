@@ -23,7 +23,7 @@ class BusinessUserBase(BaseModel):
     is_active: bool = True
 
     class Config:
-        allow_population_by_field_name = True
+        populate_by_name = True
 
 
 class BusinessUserCreate(BusinessUserBase):
@@ -81,4 +81,4 @@ class BusinessUser(BusinessUserBase):
 
     class Config:
         from_attributes = True
-        allow_population_by_field_name = True
+        populate_by_name = True

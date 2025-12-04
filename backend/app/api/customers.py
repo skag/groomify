@@ -26,6 +26,11 @@ from app.services.customer_service import (
     add_customer_user,
     CustomerServiceError,
 )
+from app.services.appointment_service import (
+    get_customer_booking_history,
+    AppointmentServiceError,
+)
+from app.schemas.appointment import CustomerAppointmentHistory
 from app.core.logger import get_logger
 
 logger = get_logger("app.api.customers")
@@ -87,6 +92,46 @@ def get_customer(
         )
 
     return customer
+
+
+@router.get(
+    "/{customer_id}/booking-history",
+    response_model=list[CustomerAppointmentHistory],
+    summary="Get customer booking history",
+    description="Retrieve all past appointments for a customer across all their pets.",
+)
+def get_booking_history(
+    customer_id: int,
+    business_id: BusinessId,
+    db: Session = Depends(get_db),
+) -> list[CustomerAppointmentHistory]:
+    """
+    Get all past appointments for a customer.
+
+    Returns appointments where appointment_datetime < now(),
+    ordered by most recent first. Includes pet name and services.
+    """
+    try:
+        return get_customer_booking_history(db, customer_id, business_id)
+
+    except AppointmentServiceError as e:
+        logger.warning(f"Booking history fetch failed: {e}")
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(e),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    except Exception as e:
+        logger.error(f"Error fetching booking history for customer {customer_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch booking history",
+        )
 
 
 @router.post(

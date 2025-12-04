@@ -11,6 +11,7 @@ from app.core.dependencies import (
 from app.schemas.pet import (
     Pet as PetSchema,
     PetWithCustomer as PetWithCustomerSchema,
+    PetSearchResult as PetSearchResultSchema,
     PetAdd,
     PetUpdate,
 )
@@ -21,6 +22,7 @@ from app.services.pet_service import (
     add_pet_to_customer,
     update_pet,
     delete_pet,
+    search_pets,
     PetServiceError,
 )
 from app.core.logger import get_logger
@@ -74,6 +76,40 @@ def list_all_pets(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch pets",
+        )
+
+
+@router.get(
+    "/pets/search",
+    response_model=list[PetSearchResultSchema],
+    summary="Search pets",
+    description="Search pets by pet name, family name, phone number, or customer user name.",
+)
+def search_pets_endpoint(
+    q: str,
+    business_id: BusinessId,
+    db: Session = Depends(get_db),
+) -> list[PetSearchResultSchema]:
+    """
+    Search pets with unified search across multiple fields.
+
+    Searches by:
+    - Pet name
+    - Family/account name
+    - Phone number (any customer user)
+    - Customer user name (first name, last name, or full name)
+
+    Returns results with primary contact information only.
+    Requires authentication. Business ID is extracted from JWT token.
+    """
+    try:
+        results = search_pets(db, business_id, q)
+        return results
+    except Exception as e:
+        logger.error(f"Error searching pets for business {business_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to search pets",
         )
 
 
@@ -156,17 +192,17 @@ def add_pet_to_customer_endpoint(
 
 @router.get(
     "/pets/{pet_id}",
-    response_model=PetSchema,
+    response_model=PetWithCustomerSchema,
     summary="Get a pet",
-    description="Retrieve a single pet by ID.",
+    description="Retrieve a single pet by ID with customer information.",
 )
 def get_pet(
     pet_id: int,
     business_id: BusinessId,
     db: Session = Depends(get_db),
-) -> PetSchema:
+) -> PetWithCustomerSchema:
     """
-    Get a single pet by ID.
+    Get a single pet by ID with customer information.
 
     Requires authentication. Pet must belong to the same business.
     Business ID is extracted from JWT token.
@@ -179,7 +215,24 @@ def get_pet(
             detail=f"Pet with ID {pet_id} not found",
         )
 
-    return pet
+    # Transform to include customer account_name
+    pet_dict = {
+        "id": pet.id,
+        "customer_id": pet.customer_id,
+        "business_id": pet.business_id,
+        "name": pet.name,
+        "species": pet.species,
+        "breed": pet.breed,
+        "age": pet.age,
+        "weight": pet.weight,
+        "special_notes": pet.special_notes,
+        "default_groomer_id": pet.default_groomer_id,
+        "notes": pet.notes or [],
+        "created_at": pet.created_at,
+        "updated_at": pet.updated_at,
+        "account_name": pet.customer.account_name if pet.customer else "",
+    }
+    return PetWithCustomerSchema(**pet_dict)
 
 
 @router.put(

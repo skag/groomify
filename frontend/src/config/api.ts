@@ -48,14 +48,19 @@ export const API_CONFIG = {
       update: (id: number) => `/api/customers/${id}`,
       delete: (id: number) => `/api/customers/${id}`,
       addUser: (id: number) => `/api/customers/${id}/users`,
+      bookingHistory: (id: number) => `/api/customers/${id}/booking-history`,
     },
     pets: {
       list: '/api/pets',
+      search: (query: string) => `/api/pets/search?q=${encodeURIComponent(query)}`,
       listByCustomer: (customerId: number) => `/api/customers/${customerId}/pets`,
       create: (customerId: number) => `/api/customers/${customerId}/pets`,
       get: (id: number) => `/api/pets/${id}`,
       update: (id: number) => `/api/pets/${id}`,
       delete: (id: number) => `/api/pets/${id}`,
+    },
+    appointments: {
+      daily: (date: string) => `/api/appointments/daily?date=${date}`,
     },
   },
 } as const;

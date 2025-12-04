@@ -1,14 +1,15 @@
 """Pet service for CRUD operations"""
 
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_
+from sqlalchemy.orm import Session, joinedload, aliased
+from sqlalchemy import and_, or_, func
 from datetime import datetime, timezone
 
 from app.models.pet import Pet
 from app.models.customer import Customer
+from app.models.customer_user import CustomerUser
 from app.models.animal_type import AnimalType
 from app.models.animal_breed import AnimalBreed
-from app.schemas.pet import PetAdd, PetUpdate
+from app.schemas.pet import PetAdd, PetUpdate, PetSearchResult
 from app.core.logger import get_logger
 
 logger = get_logger("app.services.pet_service")
@@ -276,3 +277,96 @@ def delete_pet(db: Session, pet_id: int, business_id: int) -> Pet:
         db.rollback()
         logger.error(f"Error deleting pet {pet_id}: {e}")
         raise PetServiceError(f"Failed to delete pet: {str(e)}")
+
+
+def search_pets(db: Session, business_id: int, query: str) -> list[PetSearchResult]:
+    """
+    Search pets by pet name, family name, phone number, or customer user name.
+
+    Searches across ALL customer_users for matches, but returns results
+    with primary contact information only. Returns one result per pet.
+
+    Args:
+        db: Database session
+        business_id: Business ID to scope results
+        query: Search query string
+
+    Returns:
+        List of PetSearchResult with denormalized display data
+    """
+    if not query or not query.strip():
+        return []
+
+    search_term = f"%{query.strip()}%"
+
+    # Step 1: Find distinct pet IDs that match the search
+    # Search across ALL customer_users (not just primary)
+    matching_pet_ids_query = (
+        db.query(Pet.id)
+        .join(Customer, Pet.customer_id == Customer.id)
+        .join(CustomerUser, Customer.id == CustomerUser.customer_id)
+        .filter(
+            and_(
+                Pet.business_id == business_id,
+                or_(
+                    Pet.name.ilike(search_term),
+                    Customer.account_name.ilike(search_term),
+                    CustomerUser.phone.ilike(search_term),
+                    CustomerUser.first_name.ilike(search_term),
+                    CustomerUser.last_name.ilike(search_term),
+                    func.concat(
+                        CustomerUser.first_name, " ", CustomerUser.last_name
+                    ).ilike(search_term),
+                ),
+            )
+        )
+        .distinct()
+    )
+
+    matching_pet_ids = [row[0] for row in matching_pet_ids_query.all()]
+
+    if not matching_pet_ids:
+        return []
+
+    # Step 2: Get display data with PRIMARY contact only
+    # Use an alias for the primary contact subquery
+    PrimaryContact = aliased(CustomerUser)
+
+    results = (
+        db.query(
+            Pet.id.label("pet_id"),
+            Pet.name.label("pet_name"),
+            Customer.account_name.label("family_name"),
+            PrimaryContact.phone.label("phone"),
+            func.concat(
+                PrimaryContact.first_name, " ", PrimaryContact.last_name
+            ).label("customer_user_name"),
+            Pet.species.label("species"),
+            Pet.breed.label("breed"),
+        )
+        .join(Customer, Pet.customer_id == Customer.id)
+        .outerjoin(
+            PrimaryContact,
+            and_(
+                Customer.id == PrimaryContact.customer_id,
+                PrimaryContact.is_primary_contact == True,
+            ),
+        )
+        .filter(Pet.id.in_(matching_pet_ids))
+        .order_by(Pet.name)
+        .all()
+    )
+
+    # Convert to PetSearchResult objects
+    return [
+        PetSearchResult(
+            pet_id=row.pet_id,
+            pet_name=row.pet_name,
+            family_name=row.family_name,
+            phone=row.phone,
+            customer_user_name=row.customer_user_name or "",
+            species=row.species,
+            breed=row.breed,
+        )
+        for row in results
+    ]

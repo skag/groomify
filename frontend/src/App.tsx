@@ -9,7 +9,6 @@ import CustomersAdd from './pages/CustomersAdd'
 import CustomerDetail from './pages/CustomerDetail'
 import Pets from './pages/Pets'
 import Appointments from './pages/Appointments'
-import AppointmentsBook from './pages/AppointmentsBook'
 import Settings from './pages/Settings'
 import AccountSettings from './pages/settings/Account'
 import StaffSettings from './pages/settings/Staff'
@@ -88,10 +87,10 @@ function App() {
             }
           />
           <Route
-            path="/appointments/book"
+            path="/appointments/:petId"
             element={
               <ProtectedRoute>
-                <AppointmentsBook />
+                <Appointments />
               </ProtectedRoute>
             }
           />

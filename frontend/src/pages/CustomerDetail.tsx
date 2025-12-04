@@ -64,6 +64,11 @@ export default function CustomerDetail() {
     spayedNeutered: false,
   })
 
+  const formatTime = (isoDate: string): string => {
+    const date = new Date(isoDate)
+    return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }).toLowerCase()
+  }
+
   const loadCustomerData = async () => {
     if (!id) {
       navigate('/customers')
@@ -72,9 +77,10 @@ export default function CustomerDetail() {
 
     try {
       setIsLoading(true)
-      const [apiCustomer, pets] = await Promise.all([
+      const [apiCustomer, pets, bookingHistoryData] = await Promise.all([
         customerService.getCustomerById(parseInt(id)),
-        petService.getPetsByCustomer(parseInt(id))
+        petService.getPetsByCustomer(parseInt(id)),
+        customerService.getBookingHistory(parseInt(id))
       ])
 
       // Transform API data to CustomerDetailData format
@@ -98,7 +104,18 @@ export default function CustomerDetail() {
           nextBooking: null,
           lastBooked: null,
         })),
-        bookingHistory: [], // TODO: Get from appointments API
+        bookingHistory: bookingHistoryData.map(booking => ({
+          id: booking.id.toString(),
+          petName: booking.pet_name,
+          date: booking.date,
+          startTime: formatTime(booking.date),
+          endTime: formatTime(booking.end_time),
+          durationMinutes: booking.duration_minutes,
+          services: booking.services,
+          tip: booking.tip,
+          hasNote: booking.has_note,
+          note: booking.note,
+        })),
         clientNotes: [], // TODO: Get from customer notes
         petNotes: [], // TODO: Get from pet notes
         serviceAgreementSigned: false, // TODO: Get from agreements
@@ -194,33 +211,7 @@ export default function CustomerDetail() {
       })
 
       // Reload customer data
-      const apiCustomer = await customerService.getCustomerById(parseInt(id))
-      const transformedData: CustomerDetailData = {
-        familyName: apiCustomer.account_name,
-        customerUsers: apiCustomer.customer_users.map(cu => ({
-          id: cu.id.toString(),
-          name: `${cu.first_name} ${cu.last_name}`,
-          phone: cu.phone || '',
-          email: cu.email,
-          isPrimary: cu.is_primary_contact,
-        })),
-        pets: apiCustomer.pets.map(pet => ({
-          id: pet.id.toString(),
-          name: pet.name,
-          breed: pet.breed || pet.species,
-          imageUrl: '',
-          groomerName: '',
-          vaccinationStatus: 'inactive',
-          vaccinations: [],
-          nextBooking: null,
-          lastBooked: null,
-        })),
-        bookingHistory: [],
-        clientNotes: [],
-        petNotes: [],
-        serviceAgreementSigned: false,
-      }
-      setCustomerData(transformedData)
+      await loadCustomerData()
     } catch (error) {
       console.error('Failed to add pet:', error)
       toast.error('Failed to add pet')
@@ -248,33 +239,7 @@ export default function CustomerDetail() {
       setNewContact({ firstName: '', lastName: '', email: '', phone: '' })
 
       // Reload customer data
-      const apiCustomer = await customerService.getCustomerById(parseInt(id))
-      const transformedData: CustomerDetailData = {
-        familyName: apiCustomer.account_name,
-        customerUsers: apiCustomer.customer_users.map(cu => ({
-          id: cu.id.toString(),
-          name: `${cu.first_name} ${cu.last_name}`,
-          phone: cu.phone || '',
-          email: cu.email,
-          isPrimary: cu.is_primary_contact,
-        })),
-        pets: apiCustomer.pets.map(pet => ({
-          id: pet.id.toString(),
-          name: pet.name,
-          breed: pet.breed || pet.species,
-          imageUrl: '',
-          groomerName: '',
-          vaccinationStatus: 'inactive',
-          vaccinations: [],
-          nextBooking: null,
-          lastBooked: null,
-        })),
-        bookingHistory: [],
-        clientNotes: [],
-        petNotes: [],
-        serviceAgreementSigned: false,
-      }
-      setCustomerData(transformedData)
+      await loadCustomerData()
     } catch (error) {
       console.error('Failed to add contact:', error)
       toast.error('Failed to add contact')
@@ -390,9 +355,13 @@ export default function CustomerDetail() {
               <div>
                 <h2 className="text-2xl font-bold mb-4">Booking History</h2>
                 <div className="space-y-3">
-                  {customerData.bookingHistory.map((booking) => (
-                    <BookingHistoryItem key={booking.id} booking={booking} />
-                  ))}
+                  {customerData.bookingHistory.length === 0 ? (
+                    <p className="text-muted-foreground">No past bookings found.</p>
+                  ) : (
+                    customerData.bookingHistory.map((booking) => (
+                      <BookingHistoryItem key={booking.id} booking={booking} />
+                    ))
+                  )}
                 </div>
               </div>
             </div>

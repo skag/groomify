@@ -1,7 +1,7 @@
 import { Clock, Dog } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
-type AppointmentStatus = "scheduled" | "checked-in" | "in-process" | "ready-for-pickup" | "checked-out"
+export type AppointmentStatus = "scheduled" | "confirmed" | "in_progress" | "completed" | "cancelled" | "no_show"
 
 interface AppointmentCardProps {
   petName: string
@@ -32,10 +32,11 @@ const getTagColor = (tag: string) => {
 const getStatusColor = (status: AppointmentStatus): string => {
   const colors: Record<AppointmentStatus, string> = {
     'scheduled': 'bg-gray-100 text-gray-800 border-gray-300',
-    'checked-in': 'bg-blue-100 text-blue-800 border-blue-300',
-    'in-process': 'bg-yellow-100 text-yellow-800 border-yellow-300',
-    'ready-for-pickup': 'bg-green-100 text-green-800 border-green-300',
-    'checked-out': 'bg-slate-100 text-slate-800 border-slate-300'
+    'confirmed': 'bg-blue-100 text-blue-800 border-blue-300',
+    'in_progress': 'bg-yellow-100 text-yellow-800 border-yellow-300',
+    'completed': 'bg-green-100 text-green-800 border-green-300',
+    'cancelled': 'bg-red-100 text-red-800 border-red-300',
+    'no_show': 'bg-slate-100 text-slate-800 border-slate-300'
   }
   return colors[status]
 }
@@ -43,10 +44,11 @@ const getStatusColor = (status: AppointmentStatus): string => {
 const getStatusLabel = (status: AppointmentStatus): string => {
   const labels: Record<AppointmentStatus, string> = {
     'scheduled': 'Scheduled',
-    'checked-in': 'Checked In',
-    'in-process': 'In Process',
-    'ready-for-pickup': 'Ready',
-    'checked-out': 'Checked Out'
+    'confirmed': 'Confirmed',
+    'in_progress': 'In Progress',
+    'completed': 'Completed',
+    'cancelled': 'Cancelled',
+    'no_show': 'No Show'
   }
   return labels[status]
 }

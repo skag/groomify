@@ -2,14 +2,10 @@
 
 import * as React from "react"
 import {
-  Home,
   Users,
-  UserCircle,
-  Dog,
   Calendar,
   Scissors,
   CalendarDays,
-  CalendarPlus,
 } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
@@ -49,16 +45,7 @@ const data = {
       title: "Appointments",
       url: "/appointments",
       icon: Calendar,
-      items: [
-        {
-          title: "View Schedule",
-          url: "/appointments",
-        },
-        {
-          title: "Book Appointment",
-          url: "/appointments/book",
-        },
-      ],
+      items: [],
     },
     {
       title: "Customers",

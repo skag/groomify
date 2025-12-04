@@ -61,6 +61,7 @@ export const API_CONFIG = {
     },
     appointments: {
       create: '/api/appointments',
+      update: (id: number) => `/api/appointments/${id}`,
       daily: (date: string) => `/api/appointments/daily?date=${date}`,
     },
   },

@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ChevronLeft, ChevronRight, Loader2, Calendar, CalendarDays, Search, Dog } from "lucide-react"
 import { AppointmentsCalendar, type Appointment, type CalendarDate, type CalendarGroomer, type CalendarPet, type CalendarService } from "@/components/AppointmentsCalendar"
-import { appointmentService, type DailyAppointmentsResponse, type CreateAppointmentRequest } from "@/services/appointmentService"
+import { appointmentService, type DailyAppointmentsResponse, type CreateAppointmentRequest, type UpdateAppointmentRequest } from "@/services/appointmentService"
 import { petService, type PetSearchResult } from "@/services/petService"
 import { serviceService } from "@/services/serviceService"
 import type { Service } from "@/types/service"
@@ -449,29 +449,45 @@ export default function Appointments() {
     startTime: string
     endTime: string
   }) => {
-    // TODO: Implement update API call
-    // For now, just update the local state optimistically
-    const durationMinutes = calculateDurationMinutes(booking.startTime, booking.endTime)
+    try {
+      // Build the appointment datetime (keep the same date, update time)
+      const { hours, minutes } = parseTimeString(booking.startTime)
+      const appointmentDatetime = new Date(booking.date)
+      appointmentDatetime.setHours(hours, minutes, 0, 0)
 
-    setAppointments(prev => prev.map(appt => {
-      if (appt.id === appointmentId) {
-        return {
-          ...appt,
-          time: booking.startTime,
-          endTime: booking.endTime,
-          petId: booking.petId,
-          petName: booking.petName,
-          serviceId: booking.serviceId,
-          service: booking.serviceName,
-          groomer: booking.groomerName,
-          groomerId: booking.groomerId,
-          date: formatDateToISO(booking.date),
-        }
+      // Calculate duration from start and end times
+      const durationMinutes = calculateDurationMinutes(booking.startTime, booking.endTime)
+
+      const request: UpdateAppointmentRequest = {
+        staff_id: booking.groomerId,
+        service_ids: [booking.serviceId],
+        appointment_datetime: appointmentDatetime.toISOString(),
+        duration_minutes: durationMinutes,
       }
-      return appt
-    }))
 
-    console.log('Appointment updated (local only):', { appointmentId, booking, durationMinutes })
+      const response = await appointmentService.updateAppointment(appointmentId, request)
+
+      // Update local state with the response
+      setAppointments(prev => prev.map(appt => {
+        if (appt.id === appointmentId) {
+          return {
+            ...appt,
+            time: booking.startTime,
+            endTime: booking.endTime,
+            petId: response.pet_id,
+            petName: response.pet_name,
+            serviceId: booking.serviceId,
+            service: booking.serviceName,
+            groomer: response.staff_name,
+            groomerId: response.staff_id,
+          }
+        }
+        return appt
+      }))
+    } catch (err) {
+      console.error('Failed to update appointment:', err)
+      alert('Failed to update appointment. Please try again.')
+    }
   }
 
   if (isLoadingPet) {

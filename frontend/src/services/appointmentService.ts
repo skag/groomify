@@ -63,6 +63,29 @@ export interface CreateAppointmentResponse {
   notes: string | null;
 }
 
+export interface UpdateAppointmentRequest {
+  staff_id?: number;
+  service_ids?: number[];
+  appointment_datetime?: string; // ISO datetime string
+  duration_minutes?: number;
+  notes?: string | null;
+}
+
+export interface UpdateAppointmentResponse {
+  id: number;
+  pet_id: number;
+  pet_name: string;
+  customer_id: number;
+  customer_name: string;
+  staff_id: number;
+  staff_name: string;
+  appointment_datetime: string;
+  duration_minutes: number;
+  services: AppointmentServiceInfo[];
+  status: AppointmentStatus | null;
+  notes: string | null;
+}
+
 /**
  * Format a Date object to YYYY-MM-DD string
  */
@@ -95,6 +118,21 @@ export const appointmentService = {
   createAppointment: async (data: CreateAppointmentRequest): Promise<CreateAppointmentResponse> => {
     return api.post<CreateAppointmentResponse>(
       API_CONFIG.endpoints.appointments.create,
+      data,
+      {
+        requiresAuth: true,
+      }
+    );
+  },
+
+  /**
+   * Update an existing appointment
+   * @param id - The appointment ID
+   * @param data - The fields to update
+   */
+  updateAppointment: async (id: number, data: UpdateAppointmentRequest): Promise<UpdateAppointmentResponse> => {
+    return api.patch<UpdateAppointmentResponse>(
+      API_CONFIG.endpoints.appointments.update(id),
       data,
       {
         requiresAuth: true,

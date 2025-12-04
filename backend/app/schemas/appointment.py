@@ -63,6 +63,36 @@ class AppointmentUpdate(BaseModel):
         populate_by_name = True
 
 
+class UpdateAppointmentRequest(BaseModel):
+    """Request schema for updating an appointment from calendar"""
+
+    staff_id: int | None = None
+    service_ids: list[int] | None = None
+    appointment_datetime: datetime | None = None
+    duration_minutes: int | None = Field(None, ge=15, le=480)
+    notes: str | None = None
+
+
+class UpdateAppointmentResponse(BaseModel):
+    """Response schema for updated appointment"""
+
+    id: int
+    pet_id: int
+    pet_name: str
+    customer_id: int
+    customer_name: str
+    staff_id: int
+    staff_name: str
+    appointment_datetime: datetime
+    duration_minutes: int
+    services: list["AppointmentServiceSchema"]
+    status: StatusLiteral
+    notes: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
 class Appointment(AppointmentBase):
     """Schema for appointment response"""
 

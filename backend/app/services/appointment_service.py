@@ -363,3 +363,117 @@ def create_appointment(
     )
 
     return appointment
+
+
+def update_appointment(
+    db: Session,
+    business_id: int,
+    appointment_id: int,
+    staff_id: int | None = None,
+    service_ids: list[int] | None = None,
+    appointment_datetime: datetime | None = None,
+    duration_minutes: int | None = None,
+    notes: str | None = None,
+) -> Appointment:
+    """
+    Update an existing appointment.
+
+    Args:
+        db: Database session
+        business_id: Business ID
+        appointment_id: ID of the appointment to update
+        staff_id: New staff member (groomer) ID (optional)
+        service_ids: New list of service IDs (optional)
+        appointment_datetime: New appointment date and time (optional)
+        duration_minutes: New duration in minutes (optional)
+        notes: New notes (optional)
+
+    Returns:
+        Updated Appointment object
+
+    Raises:
+        AppointmentServiceError: If validation fails or appointment not found
+    """
+    # Get the appointment and verify it belongs to the business
+    appointment = (
+        db.query(Appointment)
+        .filter(
+            and_(
+                Appointment.id == appointment_id,
+                Appointment.business_id == business_id,
+            )
+        )
+        .first()
+    )
+
+    if not appointment:
+        raise AppointmentServiceError(
+            f"Appointment {appointment_id} not found for business {business_id}"
+        )
+
+    # Update staff member if provided
+    if staff_id is not None:
+        staff_member = (
+            db.query(BusinessUser)
+            .filter(
+                and_(
+                    BusinessUser.id == staff_id,
+                    BusinessUser.business_id == business_id,
+                    BusinessUser.is_active == True,
+                )
+            )
+            .first()
+        )
+
+        if not staff_member:
+            raise AppointmentServiceError(
+                f"Staff member {staff_id} not found or not active for business {business_id}"
+            )
+
+        appointment.staff_id = staff_id
+
+    # Update services if provided
+    if service_ids is not None:
+        if service_ids:
+            services = (
+                db.query(Service)
+                .filter(
+                    and_(
+                        Service.id.in_(service_ids),
+                        Service.business_id == business_id,
+                    )
+                )
+                .all()
+            )
+
+            if len(services) != len(service_ids):
+                found_ids = {s.id for s in services}
+                missing_ids = set(service_ids) - found_ids
+                raise AppointmentServiceError(
+                    f"Services not found for business: {missing_ids}"
+                )
+
+            appointment.services = services
+        else:
+            appointment.services = []
+
+    # Update appointment datetime if provided
+    if appointment_datetime is not None:
+        appointment.appointment_datetime = appointment_datetime
+
+    # Update duration if provided
+    if duration_minutes is not None:
+        appointment.duration_minutes = duration_minutes
+
+    # Update notes if provided (allow setting to None)
+    if notes is not None:
+        appointment.notes = notes
+
+    db.commit()
+    db.refresh(appointment)
+
+    logger.info(
+        f"Updated appointment {appointment.id} for business {business_id}"
+    )
+
+    return appointment

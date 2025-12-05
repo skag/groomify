@@ -36,6 +36,7 @@
     "lucide-react": "^0.555.0",
     "radio-group": "^0.0.2",
     "react": "^19.2.0",
+    "react-day-picker": "^9.11.3",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.10.0",
     "sonner": "^2.0.7",

@@ -14,7 +14,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
-import { Plus, Clock, Dog, User, Calendar, X, ExternalLink, CheckCircle2, XCircle, AlertCircle, LayoutGrid, CalendarDays, Loader2 } from "lucide-react"
+import { Plus, Clock, Dog, User, Calendar, X, ExternalLink, CheckCircle2, XCircle, AlertCircle, Loader2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import {
   Dialog,
@@ -27,13 +27,11 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
-import { AppointmentsCalendar } from "@/components/AppointmentsCalendar"
+import { CancelAppointmentModal } from "@/components/CancelAppointmentModal"
 import { appointmentService } from "@/services/appointmentService"
 import type { AppointmentStatusResponse, DailyAppointmentItem } from "@/services/appointmentService"
 import type { AppointmentStatus as BackendAppointmentStatus } from "@/components/AppointmentCard"
-import type { CalendarGroomer } from "@/components/AppointmentsCalendar"
 
-type ViewMode = "kanban" | "calendar"
 
 // Internal appointment type for Today page
 interface Appointment {
@@ -73,12 +71,12 @@ export default function Today() {
   const [showCheckoutModal, setShowCheckoutModal] = useState(false)
   const [checkoutAmount, setCheckoutAmount] = useState("")
   const [checkoutAppointment, setCheckoutAppointment] = useState<Appointment | null>(null)
-  const [viewMode, setViewMode] = useState<ViewMode>("kanban")
+  const [showCancelModal, setShowCancelModal] = useState(false)
+  const [cancelAppointment, setCancelAppointment] = useState<Appointment | null>(null)
 
   // Data state
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [columns, setColumns] = useState<KanbanColumn[]>([])
-  const [groomers, setGroomers] = useState<CalendarGroomer[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -110,13 +108,6 @@ export default function Today() {
             order: s.order,
           }))
         setColumns(kanbanColumns)
-
-        // Extract groomers with id and name
-        const groomerList: CalendarGroomer[] = dailyData.groomers.map(g => ({
-          id: g.id,
-          name: g.name,
-        }))
-        setGroomers(groomerList)
 
         // Transform daily appointments to internal format
         const allAppointments: Appointment[] = []
@@ -217,12 +208,6 @@ export default function Today() {
     handleCloseModal()
   }
 
-  const handleStartProcess = async () => {
-    if (!selectedAppointment) return
-    await handleStatusChange(selectedAppointment.id, "in_progress")
-    handleCloseModal()
-  }
-
   const handleMarkReady = async () => {
     if (!selectedAppointment) return
     await handleStatusChange(selectedAppointment.id, "ready_for_pickup")
@@ -237,16 +222,27 @@ export default function Today() {
   }
 
   const handleBookNext = () => {
+    if (selectedAppointment) {
+      navigate(`/appointments?pet=${selectedAppointment.petId}`)
+    }
     handleCloseModal()
-    navigate('/appointments/book')
   }
 
-  const handleCancel = async () => {
+  const handleCancel = () => {
     if (!selectedAppointment) return
-    if (confirm(`Are you sure you want to cancel the appointment for ${selectedAppointment.petName}?`)) {
-      await handleStatusChange(selectedAppointment.id, "cancelled")
-      handleCloseModal()
+    setCancelAppointment(selectedAppointment)
+    setSelectedAppointment(null)
+    setShowCancelModal(true)
+  }
+
+  const handleConfirmCancel = async (appointmentId: number, chargeAmount: number | null) => {
+    await handleStatusChange(appointmentId, "cancelled")
+    // TODO: Handle chargeAmount when transaction system is implemented
+    if (chargeAmount !== null) {
+      console.log(`Cancellation fee of $${chargeAmount} to be charged`)
     }
+    setShowCancelModal(false)
+    setCancelAppointment(null)
   }
 
   const handleViewPetDetails = () => {
@@ -321,8 +317,8 @@ export default function Today() {
         )
       case "checked_in":
         return (
-          <Button onClick={handleStartProcess} className="w-full sm:w-auto">
-            Start Process
+          <Button onClick={handleMarkReady} className="w-full sm:w-auto">
+            Ready for pick-up
           </Button>
         )
       case "in_progress":
@@ -400,36 +396,15 @@ export default function Today() {
         </header>
 
         <div className="flex flex-1 flex-col gap-4 p-6 pt-0">
-          {/* Date Header and View Selector */}
-          <div className="flex items-center justify-between">
-            <div className="flex flex-col gap-1">
-              <h1 className="text-2xl font-bold tracking-tight">{todayDate}</h1>
-              <p className="text-sm text-muted-foreground">
-                {appointments.length} appointments today
-              </p>
-            </div>
-
-            {/* View Mode Selector */}
-            <div className="flex gap-1 border rounded-lg p-1">
-              <Button
-                variant={viewMode === "kanban" ? "default" : "ghost"}
-                size="icon"
-                onClick={() => setViewMode("kanban")}
-              >
-                <LayoutGrid className="h-4 w-4" />
-              </Button>
-              <Button
-                variant={viewMode === "calendar" ? "default" : "ghost"}
-                size="icon"
-                onClick={() => setViewMode("calendar")}
-              >
-                <CalendarDays className="h-4 w-4" />
-              </Button>
-            </div>
+          {/* Date Header */}
+          <div className="flex flex-col gap-1">
+            <h1 className="text-2xl font-bold tracking-tight">{todayDate}</h1>
+            <p className="text-sm text-muted-foreground">
+              {appointments.length} appointments today
+            </p>
           </div>
 
           {/* Kanban Board */}
-          {viewMode === "kanban" && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 flex-1">
             {columns.map((column) => {
               const columnAppointments = appointments.filter(a => a.status === column.status)
@@ -505,40 +480,6 @@ export default function Today() {
               )
             })}
           </div>
-          )}
-
-          {/* Calendar View */}
-          {viewMode === "calendar" && (
-            <AppointmentsCalendar
-              appointments={appointments.map(apt => ({
-                id: apt.id,
-                time: apt.time,
-                endTime: apt.endTime || apt.time,
-                petName: apt.petName,
-                owner: apt.owner,
-                service: apt.service,
-                groomer: apt.groomer,
-                groomerId: apt.groomerId,
-                date: new Date().toISOString().split('T')[0], // Today's date
-                tags: apt.tags,
-                status: apt.status
-              }))}
-              groomers={groomers}
-              dates={[{
-                date: new Date(),
-                dateStr: new Date().toISOString().split('T')[0],
-                label: new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' }),
-                isToday: true,
-              }]}
-              viewMode="day"
-              onAppointmentClick={(appointment) => {
-                const fullAppointment = appointments.find(a => a.id === appointment.id)
-                if (fullAppointment) {
-                  handleAppointmentClick(fullAppointment)
-                }
-              }}
-            />
-          )}
         </div>
       </SidebarInset>
 
@@ -661,24 +602,25 @@ export default function Today() {
           </div>
 
           <DialogFooter className="flex-col sm:flex-row gap-2">
-            <div className="flex gap-2 flex-1">
+            {selectedAppointment?.status !== "checked_in" && selectedAppointment?.status !== "ready_for_pickup" && selectedAppointment?.status !== "completed" && (
               <Button
-                variant="outline"
-                onClick={selectedAppointment?.status === "scheduled" ? handleReschedule : handleBookNext}
-                className="flex-1"
-              >
-                <Calendar className="mr-2 h-4 w-4" />
-                {selectedAppointment?.status === "scheduled" ? "Reschedule" : "Book Next"}
-              </Button>
-              <Button
-                variant="outline"
+                variant="destructive"
                 onClick={handleCancel}
-                className="flex-1"
+                className="sm:mr-auto"
               >
                 <X className="mr-2 h-4 w-4" />
                 Cancel
               </Button>
-            </div>
+            )}
+            {selectedAppointment?.status !== "checked_in" && selectedAppointment?.status !== "ready_for_pickup" && (
+              <Button
+                variant="outline"
+                onClick={selectedAppointment?.status === "scheduled" ? handleReschedule : handleBookNext}
+              >
+                <Calendar className="mr-2 h-4 w-4" />
+                {selectedAppointment?.status === "scheduled" ? "Reschedule" : "Book Next"}
+              </Button>
+            )}
             {getActionButton()}
           </DialogFooter>
         </DialogContent>
@@ -745,6 +687,14 @@ export default function Today() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Cancel Appointment Modal */}
+      <CancelAppointmentModal
+        open={showCancelModal}
+        onOpenChange={setShowCancelModal}
+        appointment={cancelAppointment}
+        onConfirmCancel={handleConfirmCancel}
+      />
     </SidebarProvider>
   )
 }

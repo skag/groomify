@@ -86,6 +86,9 @@ importers:
       react:
         specifier: ^19.2.0
         version: 19.2.0
+      react-day-picker:
+        specifier: ^9.11.3
+        version: 9.11.3(react@19.2.0)
       react-dom:
         specifier: ^19.2.0
         version: 19.2.0(react@19.2.0)
@@ -698,6 +701,9 @@ packages:
   '@babel/types@7.28.5':
     resolution: {integrity: sha512-qQ5m48eI/MFLQ5PxQj4PFaprjyCTLI37ElWMmNs0K8Lk3dVeOdNpB3ks8jc7yM5CDmVC73eMVk/trk3fgmrUpA==}
     engines: {node: '>=6.9.0'}
+
+  '@date-fns/tz@1.4.1':
+    resolution: {integrity: sha512-P5LUNhtbj6YfI3iJjw5EL9eUAG6OitD0W3fWQcpQjDRc/QIsL0tRNuO1PcDvPccWL1fSTXXdE1ds+l95DV/OFA==}
 
   '@ember-data/rfc395-data@0.0.4':
     resolution: {integrity: sha512-tGRdvgC9/QMQSuSuJV45xoyhI0Pzjm7A9o/MVVA3HakXIImJbbzx/k/6dO9CUEQXIyS2y0fW6C1XaYOG7rY0FQ==}
@@ -2217,6 +2223,9 @@ packages:
     resolution: {integrity: sha512-/rJzdbnuY3DVgzqsfEfc+tJLuAKYaHzkUxSMRIU3dxKFeWGD/MGhrgAfuwSOmgfJ8enygztp9DeuvoSxauppIg==}
     engines: {node: '>=10'}
 
+  date-fns-jalali@4.1.0-0:
+    resolution: {integrity: sha512-hTIP/z+t+qKwBDcmmsnmjWTduxCg+5KfdqWQvb2X/8C9+knYY6epN/pfxdDuyVlSVeFz0sM5eEfwIUQ70U4ckg==}
+
   date-fns@4.1.0:
     resolution: {integrity: sha512-Ukq0owbQXxa/U3EGtsdVBkR1w7KOQ5gIBqdH2hkvknzZPYvBxb/aa6E8L7tmjFtkwZBu3UXBbjIgPo/Ez4xaNg==}
 
@@ -3012,6 +3021,12 @@ packages:
     resolution: {integrity: sha512-d6Zq49XTxNqv5ACCpyPBLzUf1l/1ykrocA1tm2Ax+YVknv45Z3WInuXL8MOf9uK03mGFTfJbS/ZtG6K5PbgFIA==}
     engines: {node: 6.* || 8.* || >= 10.*}
     deprecated: this package has been deprecated
+
+  react-day-picker@9.11.3:
+    resolution: {integrity: sha512-7lD12UvGbkyXqgzbYIGQTbl+x29B9bAf+k0pP5Dcs1evfpKk6zv4EdH/edNc8NxcmCiTNXr2HIYPrSZ3XvmVBg==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      react: '>=16.8.0'
 
   react-dom@19.2.0:
     resolution: {integrity: sha512-UlbRu4cAiGaIewkPyiRGJk0imDN2T3JjieT6spoL2UeSf5od4n5LB/mQ4ejmxhCFT1tYe8IvaFulzynWovsEFQ==}
@@ -4188,6 +4203,8 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.28.5
+
+  '@date-fns/tz@1.4.1': {}
 
   '@ember-data/rfc395-data@0.0.4': {}
 
@@ -5682,6 +5699,8 @@ snapshots:
     dependencies:
       unit-fns: 0.1.9
 
+  date-fns-jalali@4.1.0-0: {}
+
   date-fns@4.1.0: {}
 
   debug@2.6.9:
@@ -6570,6 +6589,13 @@ snapshots:
       ember-cli-htmlbars: 3.1.0
     transitivePeerDependencies:
       - supports-color
+
+  react-day-picker@9.11.3(react@19.2.0):
+    dependencies:
+      '@date-fns/tz': 1.4.1
+      date-fns: 4.1.0
+      date-fns-jalali: 4.1.0-0
+      react: 19.2.0
 
   react-dom@19.2.0(react@19.2.0):
     dependencies:

@@ -16,80 +16,41 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ChevronLeft, ChevronRight, Loader2, Calendar, CalendarDays, Search, Dog, X } from "lucide-react"
-import { AppointmentsCalendar, type Appointment, type CalendarDate, type CalendarGroomer, type CalendarPet, type CalendarService } from "@/components/AppointmentsCalendar"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Calendar as CalendarPicker } from "@/components/ui/calendar"
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, Calendar, CalendarDays, Search, Dog, X } from "lucide-react"
+import { AppointmentsCalendar } from "@/components/AppointmentsCalendar"
 import { appointmentService, type DailyAppointmentsResponse, type CreateAppointmentRequest, type UpdateAppointmentRequest } from "@/services/appointmentService"
 import { petService, type PetSearchResult } from "@/services/petService"
 import { serviceService } from "@/services/serviceService"
 import type { Service } from "@/types/service"
-
-type ViewMode = 'day' | 'week'
-
-interface GroomerInfo {
-  id: number
-  name: string
-}
-
-interface SelectedPet {
-  id: string
-  name: string
-  owner: string
-  breed: string
-  phone?: string | null
-  defaultGroomerId?: number | null
-}
-
-// Helper to format date to ISO string (YYYY-MM-DD)
-function formatDateToISO(date: Date): string {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-// Helper to check if two dates are the same day
-function isSameDay(date1: Date, date2: Date): boolean {
-  return formatDateToISO(date1) === formatDateToISO(date2)
-}
-
-// Helper to get start of week (Monday)
-function getStartOfWeek(date: Date): Date {
-  const d = new Date(date)
-  const day = d.getDay()
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1) // Adjust when day is Sunday
-  d.setDate(diff)
-  d.setHours(0, 0, 0, 0)
-  return d
-}
-
-// Helper to generate week dates
-function getWeekDates(startDate: Date): Date[] {
-  const dates: Date[] = []
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(startDate)
-    d.setDate(startDate.getDate() + i)
-    dates.push(d)
-  }
-  return dates
-}
-
-// Reschedule mode state type
-interface RescheduleMode {
-  active: boolean
-  appointmentId: number | null
-  originalAppointment: {
-    id: number
-    petId: number
-    petName: string
-    owner: string
-    serviceId: number | null
-    serviceName: string
-    groomerId: number
-    groomerName: string
-    datetime: string
-    durationMinutes: number
-  } | null
-}
+import type {
+  ViewMode,
+  Appointment,
+  CalendarDate,
+  CalendarGroomer,
+  CalendarPet,
+  CalendarService,
+  GroomerInfo,
+  SelectedPet,
+  RescheduleMode,
+} from "@/types/appointments"
+import {
+  formatDateToISO,
+  isSameDay,
+  getStartOfWeek,
+  getWeekDates,
+} from "@/utils/dateUtils"
+import {
+  parseTimeString,
+  calculateDurationMinutes,
+} from "@/utils/timeUtils"
 
 export default function Appointments() {
   const navigate = useNavigate()
@@ -112,6 +73,9 @@ export default function Appointments() {
   const [searchResults, setSearchResults] = useState<SelectedPet[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [showSearchDropdown, setShowSearchDropdown] = useState(false)
+
+  // Date picker popover state
+  const [datePickerOpen, setDatePickerOpen] = useState(false)
 
   // Reschedule mode state
   const [rescheduleMode, setRescheduleMode] = useState<RescheduleMode>({
@@ -163,6 +127,11 @@ export default function Appointments() {
           appointmentId: null,
           originalAppointment: null,
         })
+        // Also clear the pet that was set during reschedule mode
+        // (only if we don't have a petId in the URL)
+        if (!petId) {
+          setSelectedPet(null)
+        }
       }
       return
     }
@@ -225,7 +194,65 @@ export default function Appointments() {
     }
 
     loadAppointment()
-  }, [searchParams, setSearchParams, rescheduleMode.active, rescheduleMode.appointmentId])
+  }, [searchParams, setSearchParams, rescheduleMode.active, rescheduleMode.appointmentId, petId])
+
+  // Handle pet query parameter (pre-select pet for booking)
+  // State is driven by the query string - no pet param means no pet selected
+  useEffect(() => {
+    const petIdParam = searchParams.get('pet')
+    const rescheduleParam = searchParams.get('reschedule')
+
+    // If no pet param and not in reschedule mode, clear selected pet
+    if (!petIdParam && !rescheduleParam) {
+      if (selectedPet) {
+        setSelectedPet(null)
+        setSelectedGroomerIds(new Set()) // Reset to trigger select all
+      }
+      return
+    }
+
+    // Skip if reschedule mode is handling the pet selection
+    if (rescheduleParam) {
+      return
+    }
+
+    const petIdNum = parseInt(petIdParam!, 10)
+    if (isNaN(petIdNum)) {
+      // Invalid ID, clear the param
+      setSearchParams({}, { replace: true })
+      return
+    }
+
+    // Don't refetch if we already have this pet selected
+    if (selectedPet?.id === petIdParam) {
+      return
+    }
+
+    // Fetch the pet details
+    const loadPetForBooking = async () => {
+      setIsLoadingPet(true)
+      try {
+        const petData = await petService.getPetById(petIdNum)
+
+        setSelectedPet({
+          id: petData.id.toString(),
+          name: petData.name,
+          owner: petData.account_name || '',
+          breed: petData.breed || petData.species,
+          phone: null,
+          defaultGroomerId: petData.default_groomer_id,
+        })
+      } catch (error) {
+        console.error("Error loading pet for booking:", error)
+        // Clear the param if pet not found
+        setSearchParams({}, { replace: true })
+      } finally {
+        setIsLoadingPet(false)
+      }
+    }
+
+    loadPetForBooking()
+  }, [searchParams, setSearchParams, selectedPet])
 
   // Reset groomer selection when pet changes to use default groomer
   useEffect(() => {
@@ -257,6 +284,7 @@ export default function Appointments() {
         owner: result.family_name,
         breed: result.breed || result.species,
         phone: result.phone,
+        primaryContactName: result.customer_user_name,
       }))
       setSearchResults(pets)
     } catch (error) {
@@ -321,6 +349,7 @@ export default function Appointments() {
                 date: dateStr,
                 tags: appt.tags,
                 status: appt.status ?? undefined,
+                isConfirmed: appt.is_confirmed,
               })
             }
           }
@@ -415,28 +444,67 @@ export default function Appointments() {
     setCurrentDate(new Date())
   }
 
-  const handleSelectPet = (pet: SelectedPet) => {
-    // Navigate to the URL with pet ID
-    navigate(`/appointments/${pet.id}`)
+  const handleJumpWeeks = (weeks: number) => {
+    setCurrentDate(prev => {
+      const newDate = new Date(prev)
+      newDate.setDate(newDate.getDate() + weeks * 7)
+      return newDate
+    })
+  }
+
+  const handleDateSelect = (date: Date | undefined) => {
+    if (date) {
+      setCurrentDate(date)
+      setDatePickerOpen(false)
+    }
+  }
+
+  const handleSelectPet = async (pet: SelectedPet) => {
     setSearchQuery("")
     setShowSearchDropdown(false)
+    // Switch to week view when a pet is selected
+    setViewMode('week')
+
+    // Update URL with pet query param
+    setSearchParams({ pet: pet.id }, { replace: true })
+
+    // Fetch full pet details to get default groomer
+    try {
+      const petData = await petService.getPetById(parseInt(pet.id, 10))
+      setSelectedPet({
+        id: pet.id,
+        name: pet.name,
+        owner: pet.owner,
+        breed: pet.breed,
+        phone: pet.phone,
+        primaryContactName: pet.primaryContactName,
+        defaultGroomerId: petData.default_groomer_id,
+      })
+    } catch (error) {
+      console.error("Error fetching pet details:", error)
+      // Fall back to pet without default groomer
+      setSelectedPet({
+        id: pet.id,
+        name: pet.name,
+        owner: pet.owner,
+        breed: pet.breed,
+        phone: pet.phone,
+        primaryContactName: pet.primaryContactName,
+        defaultGroomerId: undefined,
+      })
+    }
   }
 
   const handleClearPet = () => {
-    navigate("/appointments")
+    setSelectedPet(null)
     setSelectedGroomerIds(new Set()) // Reset to trigger select all on next fetch
+    // Clear pet query param
+    setSearchParams({}, { replace: true })
   }
 
   const handleCancelReschedule = () => {
-    // Clear reschedule query param and mode
-    setSearchParams({}, { replace: true })
-    setRescheduleMode({
-      active: false,
-      appointmentId: null,
-      originalAppointment: null,
-    })
-    setSelectedPet(null)
-    setSelectedGroomerIds(new Set(groomers.map(g => g.id)))
+    // Navigate to clean appointments page (same behavior as handleClearPet)
+    navigate("/appointments", { replace: true })
   }
 
   const toggleGroomer = (groomerId: number) => {
@@ -478,25 +546,7 @@ export default function Appointments() {
     }))
   }
 
-  // Helper to parse time string (e.g., "9:00 AM") to hours and minutes
-  const parseTimeString = (timeStr: string): { hours: number; minutes: number } => {
-    const [time, period] = timeStr.split(' ')
-    let [hours, minutes] = time.includes(':') ? time.split(':').map(Number) : [Number(time), 0]
-    if (period === 'PM' && hours !== 12) hours += 12
-    if (period === 'AM' && hours === 12) hours = 0
-    return { hours, minutes }
-  }
-
-  // Helper to calculate duration in minutes from start and end time strings
-  const calculateDurationMinutes = (startTime: string, endTime: string): number => {
-    const start = parseTimeString(startTime)
-    const end = parseTimeString(endTime)
-    const startMinutes = start.hours * 60 + start.minutes
-    const endMinutes = end.hours * 60 + end.minutes
-    return endMinutes - startMinutes
-  }
-
-  // Booking confirmation handler
+// Booking confirmation handler
   const handleBookingConfirm = async (booking: {
     petId: number
     petName: string
@@ -585,6 +635,7 @@ export default function Appointments() {
         date: formatDateToISO(booking.date),
         tags: [],
         status: response.status ?? undefined,
+        isConfirmed: response.is_confirmed,
       }
 
       setAppointments(prev => [...prev, newAppointment])
@@ -715,21 +766,31 @@ export default function Appointments() {
                 </Button>
               </div>
             ) : selectedPet ? (
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 bg-primary/10 rounded-full flex items-center justify-center">
-                  <Dog className="h-5 w-5 text-primary" />
+              <div className="flex items-center gap-4 py-4 px-6 bg-green-50 border border-green-200 rounded-lg w-full max-w-2xl">
+                <div className="h-12 w-12 bg-green-100 rounded-full flex items-center justify-center shrink-0">
+                  <Dog className="h-6 w-6 text-green-600" />
                 </div>
-                <div>
-                  <p className="font-semibold text-base">{selectedPet.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {selectedPet.owner} • {selectedPet.breed}
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-lg text-green-900">{selectedPet.name}</p>
+                  <p className="text-sm text-green-700">
+                    {selectedPet.breed} • {selectedPet.owner}
                   </p>
                 </div>
+                {(selectedPet.primaryContactName || selectedPet.phone) && (
+                  <div className="flex flex-col items-end text-right shrink-0">
+                    {selectedPet.primaryContactName && (
+                      <p className="text-sm font-medium text-green-900">{selectedPet.primaryContactName}</p>
+                    )}
+                    {selectedPet.phone && (
+                      <p className="text-sm text-green-700">{selectedPet.phone}</p>
+                    )}
+                  </div>
+                )}
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={handleClearPet}
-                  className="ml-2"
+                  className="shrink-0 border-green-300 text-green-700 hover:bg-green-100"
                 >
                   Change Pet
                 </Button>
@@ -788,28 +849,73 @@ export default function Appointments() {
           {/* Date Header with Navigation and View Toggle */}
           <div className="flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handlePrevious}
-                className="h-10 w-10 shrink-0"
-              >
-                <ChevronLeft className="h-6 w-6" />
-              </Button>
+              <div className="flex items-center gap-0">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-10 w-10 shrink-0">
+                      <ChevronsLeft className="!h-[1.5rem] !w-[1.5rem]" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    {[2, 3, 4, 5, 6, 7, 8].map((weeks) => (
+                      <DropdownMenuItem key={weeks} onClick={() => handleJumpWeeks(-weeks)}>
+                        {weeks} weeks
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handlePrevious}
+                  className="h-10 w-10 shrink-0"
+                >
+                  <ChevronLeft className="!h-[1.5rem] !w-[1.5rem]" />
+                </Button>
+              </div>
               <div className="flex flex-col gap-1 min-w-[280px]">
-                <h1 className="text-2xl font-bold tracking-tight">{dateRangeLabel}</h1>
+                <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+                  <PopoverTrigger asChild>
+                    <button className="text-2xl font-bold tracking-tight text-left hover:text-primary transition-colors cursor-pointer">
+                      {dateRangeLabel}
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <CalendarPicker
+                      mode="single"
+                      selected={currentDate}
+                      onSelect={handleDateSelect}
+                    />
+                  </PopoverContent>
+                </Popover>
                 <p className="text-sm text-muted-foreground">
                   {isLoading ? 'Loading...' : `${appointments.length} appointments`}
                 </p>
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleNext}
-                className="h-10 w-10 shrink-0"
-              >
-                <ChevronRight className="h-6 w-6" />
-              </Button>
+              <div className="flex items-center gap-0">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleNext}
+                  className="h-10 w-10 shrink-0"
+                >
+                  <ChevronRight className="!h-[1.5rem] !w-[1.5rem]" />
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-10 w-10 shrink-0">
+                      <ChevronsRight className="!h-[1.5rem] !w-[1.5rem]" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {[2, 3, 4, 5, 6, 7, 8].map((weeks) => (
+                      <DropdownMenuItem key={weeks} onClick={() => handleJumpWeeks(weeks)}>
+                        {weeks} weeks
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <Button

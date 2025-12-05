@@ -1,5 +1,4 @@
-import { Clock, Dog } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { Dog } from "lucide-react"
 
 // Status is a string that comes from the database - no fixed enum
 export type AppointmentStatus = string
@@ -8,10 +7,9 @@ interface AppointmentCardProps {
   petName: string
   owner: string
   service: string
-  time: string
-  endTime: string
   tags?: string[]
   status?: AppointmentStatus
+  isConfirmed?: boolean
   onClick?: (e?: React.MouseEvent) => void
   style?: React.CSSProperties
   className?: string
@@ -57,14 +55,28 @@ const getStatusLabel = (status: AppointmentStatus): string => {
   return labels[status] || status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
+const getLeftBorderColor = (status?: AppointmentStatus, isConfirmed?: boolean): string => {
+  // Cancelled -> red
+  if (status === 'cancelled') {
+    return 'border-l-red-500'
+  }
+
+  // Scheduled + unconfirmed -> grey
+  if (status === 'scheduled' && !isConfirmed) {
+    return 'border-l-gray-400'
+  }
+
+  // All other cases (confirmed scheduled, checked_in, in_progress, etc.) -> green
+  return 'border-l-green-500'
+}
+
 export function AppointmentCard({
   petName,
   owner,
   service,
-  time,
-  endTime,
   tags,
   status,
+  isConfirmed,
   onClick,
   style,
   className = ""
@@ -72,51 +84,37 @@ export function AppointmentCard({
   return (
     <div
       onClick={onClick}
-      className={`rounded-lg border-2 border-blue-600 bg-blue-100 p-3 shadow-lg hover:shadow-xl transition-all cursor-pointer hover:bg-blue-200 ${className}`}
+      className={`rounded-lg border border-gray-300 border-l-4 ${getLeftBorderColor(status, isConfirmed)} bg-white p-3 shadow-lg hover:shadow-xl transition-all cursor-pointer ${className}`}
       style={style}
     >
-      <div className="flex flex-col gap-2 relative">
-        {/* Status Badge - Top Right */}
-        {status && (
-          <div className="absolute -top-1 -right-1">
+      <div className="flex flex-col gap-1.5">
+        {/* Header Row: Status Badge and Tags */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {status && (
             <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border ${getStatusColor(status)}`}>
               {getStatusLabel(status)}
             </span>
-          </div>
-        )}
-        {/* Time Range */}
-        <div className="flex items-center gap-2 text-xs font-medium">
-          <Clock className="h-3 w-3 text-primary" />
-          <span className="text-primary">
-            {time} - {endTime}
-          </span>
+          )}
+          {tags && tags.length > 0 && tags.map((tag) => (
+            <span
+              key={tag}
+              className={`inline-flex items-center px-1.5 py-0.5 rounded-md text-xs font-medium border ${getTagColor(tag)}`}
+            >
+              {tag}
+            </span>
+          ))}
         </div>
 
-        {/* Pet and Owner with Tags */}
-        <div className="flex items-start gap-2">
-          <div className="h-7 w-7 bg-primary/10 rounded-full flex items-center justify-center shrink-0">
-            <Dog className="h-3.5 w-3.5 text-primary" />
+        {/* Pet Name and Owner */}
+        <div className="flex items-center gap-2">
+          <div className="h-6 w-6 bg-primary/10 rounded-full flex items-center justify-center shrink-0">
+            <Dog className="h-3 w-3 text-primary" />
           </div>
-          <div className="flex flex-col gap-1 min-w-0 flex-1">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <p className="font-semibold text-sm truncate">
-                {petName}
-              </p>
-              {/* Tags next to pet name */}
-              {tags && tags.length > 0 && (
-                <>
-                  {tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className={`inline-flex items-center px-1.5 py-0.5 rounded-md text-xs font-medium border ${getTagColor(tag)}`}
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                </>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground truncate">
+          <div className="flex flex-col min-w-0 flex-1">
+            <p className="font-semibold text-sm truncate leading-tight">
+              {petName}
+            </p>
+            <p className="text-xs text-muted-foreground truncate leading-tight">
               {owner}
             </p>
           </div>

@@ -3,86 +3,36 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverAnchor } from "@/components/ui/popover"
-import { AppointmentCard, type AppointmentStatus } from "@/components/AppointmentCard"
+import { AppointmentCard } from "@/components/AppointmentCard"
 import { cn } from "@/lib/utils"
 import { Textarea } from "@/components/ui/textarea"
 import { Calendar, X, Search, Dog, Loader2, Scissors, Ban, ChevronDown } from "lucide-react"
+import type {
+  Appointment,
+  CalendarDate,
+  CalendarGroomer,
+  CalendarPet,
+  CalendarService,
+  SlotSelection,
+  RescheduleModeInfo,
+} from "@/types/appointments"
+import { BLOCK_REASONS, DEFAULT_START_HOUR } from "@/constants/appointments"
+import {
+  parseTimeToMinutes,
+  formatMinutesToTime,
+  to24HourFormat,
+  to12HourFormat,
+  getTimeSlots,
+} from "@/utils/timeUtils"
+import {
+  getAppointmentsAtSlot,
+  isSlotOccupied,
+  getNextAppointmentStart,
+  getOverlappingAppointments,
+} from "@/utils/appointmentUtils"
 
-export interface Appointment {
-  id: number
-  time: string
-  endTime: string
-  petId?: number
-  petName: string
-  owner: string
-  serviceId?: number
-  service: string
-  groomer: string
-  groomerId: number
-  date: string // ISO date string (YYYY-MM-DD)
-  tags?: string[]
-  status?: AppointmentStatus
-}
-
-export interface CalendarDate {
-  date: Date
-  dateStr: string // ISO date string (YYYY-MM-DD)
-  label: string // e.g., "Mon 12/4"
-  isToday?: boolean
-}
-
-export interface CalendarGroomer {
-  id: number
-  name: string
-}
-
-// Pet type for the booking popover
-export interface CalendarPet {
-  id: number
-  name: string
-  owner: string
-  breed: string
-}
-
-// Service type for the booking popover
-export interface CalendarService {
-  id: number
-  name: string
-  duration_minutes: number
-  price: number
-}
-
-// Block reasons for time blocking
-const BLOCK_REASONS = [
-  { id: 'lunch', label: 'Lunch Break' },
-  { id: 'meeting', label: 'Meeting' },
-  { id: 'personal', label: 'Personal Time' },
-  { id: 'training', label: 'Training' },
-  { id: 'cleaning', label: 'Equipment Cleaning' },
-  { id: 'maintenance', label: 'Maintenance' },
-  { id: 'vacation', label: 'Vacation' },
-  { id: 'sick', label: 'Sick Leave' },
-  { id: 'other', label: 'Other' },
-]
-
-// Selection state for the slot being created
-interface SlotSelection {
-  groomerId: number
-  groomerName: string
-  date: Date
-  dateStr: string
-  startMinutes: number
-  endMinutes: number
-  // Position for the popover anchor
-  anchorRect: { top: number; left: number; width: number; height: number }
-}
-
-// Reschedule mode info passed from parent
-export interface RescheduleModeInfo {
-  active: boolean
-  appointmentId: number | null
-  originalServiceName?: string
-}
+// Re-export types for backwards compatibility
+export type { Appointment, CalendarDate, CalendarGroomer, CalendarPet, CalendarService, RescheduleModeInfo }
 
 interface AppointmentsCalendarProps {
   appointments: Appointment[]
@@ -177,142 +127,8 @@ export function AppointmentsCalendar({
     }
   }
 
-  // Helper to parse time strings to minutes
-  // Handles both "9:00 AM" and "9 AM" formats
-  const parseTimeToMinutes = (timeStr: string) => {
-    const [time, period] = timeStr.split(' ')
-    let hours: number
-    let minutes: number = 0
-
-    if (time.includes(':')) {
-      [hours, minutes] = time.split(':').map(Number)
-    } else {
-      hours = Number(time)
-    }
-
-    if (period === 'PM' && hours !== 12) hours += 12
-    if (period === 'AM' && hours === 12) hours = 0
-    return hours * 60 + minutes
-  }
-
-  // Helper to format minutes to time string (e.g., "9:00 AM")
-  const formatMinutesToTimeString = (totalMinutes: number): string => {
-    const hours24 = Math.floor(totalMinutes / 60)
-    const minutes = totalMinutes % 60
-    const period = hours24 >= 12 ? 'PM' : 'AM'
-    const hours12 = hours24 === 0 ? 12 : hours24 > 12 ? hours24 - 12 : hours24
-    return `${hours12}:${minutes.toString().padStart(2, '0')} ${period}`
-  }
-
-  // Convert 12-hour format (e.g., "9:00 AM") to 24-hour format (e.g., "09:00")
-  const to24HourFormat = (time12h: string): string => {
-    if (!time12h) return ""
-    const minutes = parseTimeToMinutes(time12h)
-    const hours = Math.floor(minutes / 60)
-    const mins = minutes % 60
-    return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`
-  }
-
-  // Convert 24-hour format (e.g., "09:00") to 12-hour format (e.g., "9:00 AM")
-  const to12HourFormat = (time24h: string): string => {
-    if (!time24h) return ""
-    const [hours, mins] = time24h.split(':').map(Number)
-    const totalMinutes = hours * 60 + mins
-    return formatMinutesToTimeString(totalMinutes)
-  }
-
-  // Helper to format hour (in 24h) to time string for display
-  const formatHourToTimeString = (hour: number): string => {
-    const period = hour >= 12 ? 'PM' : 'AM'
-    const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour
-    return `${displayHour} ${period}`
-  }
-
-  // Calculate dynamic time slots based on appointments
-  const getTimeSlots = (): string[] => {
-    const defaultStartHour = 8 // 8 AM
-    const defaultEndHour = 18 // 6 PM
-
-    // Find the latest appointment end time
-    let latestEndMinutes = defaultEndHour * 60
-    for (const apt of appointments) {
-      const endMinutes = parseTimeToMinutes(apt.endTime)
-      if (endMinutes > latestEndMinutes) {
-        latestEndMinutes = endMinutes
-      }
-    }
-
-    // Add one hour buffer after the latest appointment
-    const endHour = Math.ceil(latestEndMinutes / 60) + 1
-
-    // Generate time slots from start to end
-    const slots: string[] = []
-    for (let hour = defaultStartHour; hour <= endHour; hour++) {
-      slots.push(formatHourToTimeString(hour))
-    }
-    return slots
-  }
-
-  const timeSlots = getTimeSlots()
-  const startHour = 8 // First hour shown in calendar
-
-  // Helper to get all appointments that start within this time slot hour for a specific groomer and date
-  const getAppointmentsAtSlot = (groomerId: number, dateStr: string, timeSlot: string) => {
-    const slotMinutes = parseTimeToMinutes(timeSlot)
-    const nextSlotMinutes = slotMinutes + 60 // Next hour
-
-    return appointments.filter(apt => {
-      if (apt.groomerId !== groomerId || apt.date !== dateStr) return false
-      const aptStartMinutes = parseTimeToMinutes(apt.time)
-      // Check if appointment starts within this hour slot
-      return aptStartMinutes >= slotMinutes && aptStartMinutes < nextSlotMinutes
-    }).sort((a, b) => parseTimeToMinutes(a.time) - parseTimeToMinutes(b.time))
-  }
-
-  // Helper to check if an appointment overlaps with any other appointments for the same groomer on the same date
-  const getOverlappingAppointments = (groomerId: number, dateStr: string, appointment: Appointment) => {
-    const aptStartMinutes = parseTimeToMinutes(appointment.time)
-    const aptEndMinutes = parseTimeToMinutes(appointment.endTime)
-
-    return appointments.filter(other => {
-      if (other.id === appointment.id || other.groomerId !== groomerId || other.date !== dateStr) return false
-      const otherStartMinutes = parseTimeToMinutes(other.time)
-      const otherEndMinutes = parseTimeToMinutes(other.endTime)
-
-      // Check if appointments overlap
-      return aptStartMinutes < otherEndMinutes && aptEndMinutes > otherStartMinutes
-    }).sort((a, b) => parseTimeToMinutes(a.time) - parseTimeToMinutes(b.time))
-  }
-
-  // Helper to check if this slot is occupied by a continuing appointment
-  const isSlotOccupied = (groomerId: number, dateStr: string, timeSlot: string) => {
-    const slotMinutes = parseTimeToMinutes(timeSlot)
-    const nextSlotMinutes = slotMinutes + 60
-
-    // Check all appointments for this groomer on this date
-    for (const apt of appointments.filter(a => a.groomerId === groomerId && a.date === dateStr)) {
-      const aptStartMinutes = parseTimeToMinutes(apt.time)
-      const aptEndMinutes = parseTimeToMinutes(apt.endTime)
-
-      // Check if appointment overlaps with this time slot
-      if (aptStartMinutes < nextSlotMinutes && aptEndMinutes > slotMinutes) {
-        return true
-      }
-    }
-    return false
-  }
-
-  // Find the next appointment start time after a given time for a groomer on a date
-  // Returns the start time in minutes, or null if no appointment after
-  const getNextAppointmentStart = (groomerId: number, dateStr: string, afterMinutes: number): number | null => {
-    const groomerAppointments = appointments
-      .filter(a => a.groomerId === groomerId && a.date === dateStr)
-      .map(a => parseTimeToMinutes(a.time))
-      .filter(startMinutes => startMinutes > afterMinutes)
-      .sort((a, b) => a - b)
-
-    return groomerAppointments.length > 0 ? groomerAppointments[0] : null
-  }
+  const timeSlots = getTimeSlots(appointments)
+  const startHour = DEFAULT_START_HOUR
 
   const handleAppointmentClick = (appointment: Appointment, overlappingAppts: Appointment[], anchorRect: DOMRect) => {
     // If there are overlapping appointments
@@ -452,7 +268,7 @@ export function AppointmentsCalendar({
     if (!isDragging) {
       // Simple click - create slot up to 1 hour, but limited by next appointment
       finalStartMinutes = dragStart.minutes
-      const nextAptStart = getNextAppointmentStart(dragStart.groomerId, dragStart.dateStr, dragStart.minutes)
+      const nextAptStart = getNextAppointmentStart(appointments, dragStart.groomerId, dragStart.dateStr, dragStart.minutes)
 
       if (nextAptStart !== null && nextAptStart < dragStart.minutes + 60) {
         // Next appointment starts before 1 hour, so end at next appointment
@@ -577,8 +393,8 @@ export function AppointmentsCalendar({
   // Sync time inputs when selection changes
   useEffect(() => {
     if (selection) {
-      setStartTimeInput(formatMinutesToTimeString(selection.startMinutes))
-      setEndTimeInput(formatMinutesToTimeString(selection.endMinutes))
+      setStartTimeInput(formatMinutesToTime(selection.startMinutes))
+      setEndTimeInput(formatMinutesToTime(selection.endMinutes))
     }
   }, [selection?.startMinutes, selection?.endMinutes])
 
@@ -617,7 +433,7 @@ export function AppointmentsCalendar({
     if (startTimeInput) {
       const startMinutes = parseTimeToMinutes(startTimeInput)
       const newEndMinutes = startMinutes + service.duration_minutes
-      setEndTimeInput(formatMinutesToTimeString(newEndMinutes))
+      setEndTimeInput(formatMinutesToTime(newEndMinutes))
     }
   }
 
@@ -789,7 +605,7 @@ export function AppointmentsCalendar({
                         if (selectedService && e.target.value) {
                           const startMinutes = parseTimeToMinutes(time12h)
                           const newEndMinutes = startMinutes + selectedService.duration_minutes
-                          setEndTimeInput(formatMinutesToTimeString(newEndMinutes))
+                          setEndTimeInput(formatMinutesToTime(newEndMinutes))
                         }
                       }}
                       className="bg-background h-9 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
@@ -1137,8 +953,8 @@ export function AppointmentsCalendar({
 
                     {/* Render time slots within this column */}
                     {timeSlots.map((timeSlot) => {
-                      const appointmentsInSlot = getAppointmentsAtSlot(groomer.id, calDate.dateStr, timeSlot)
-                      const occupied = appointmentsInSlot.length === 0 && isSlotOccupied(groomer.id, calDate.dateStr, timeSlot)
+                      const appointmentsInSlot = getAppointmentsAtSlot(appointments, groomer.id, calDate.dateStr, timeSlot)
+                      const occupied = appointmentsInSlot.length === 0 && isSlotOccupied(appointments, groomer.id, calDate.dateStr, timeSlot)
 
                       return (
                         <div
@@ -1170,6 +986,9 @@ export function AppointmentsCalendar({
                             }
                           }}
                         >
+                          {/* Half-hour line */}
+                          <div className="absolute left-0 right-0 top-[50px] border-t border-dashed border-gray-200 pointer-events-none" />
+
                           {appointmentsInSlot.length > 0 ? (
                             appointmentsInSlot.map((appointment) => {
                               const slotMinutes = parseTimeToMinutes(timeSlot)
@@ -1189,7 +1008,7 @@ export function AppointmentsCalendar({
                               const borderAdjustment = (slotsSpanned - 1) * 1 // 1px border between slots
 
                               // Check for overlaps with ALL appointments, not just ones in this slot
-                              const overlappingAppts = getOverlappingAppointments(groomer.id, calDate.dateStr, appointment)
+                              const overlappingAppts = getOverlappingAppointments(appointments, groomer.id, calDate.dateStr, appointment)
                               // Find the index of this appointment among all overlapping appointments
                               const allOverlapping = [appointment, ...overlappingAppts].sort((a, b) =>
                                 parseTimeToMinutes(a.time) - parseTimeToMinutes(b.time)
@@ -1212,10 +1031,9 @@ export function AppointmentsCalendar({
                                   petName={appointment.petName}
                                   owner={appointment.owner}
                                   service={appointment.service}
-                                  time={appointment.time}
-                                  endTime={appointment.endTime}
                                   tags={appointment.tags}
                                   status={appointment.status}
+                                  isConfirmed={appointment.isConfirmed}
                                   onClick={(e) => {
                                     e?.stopPropagation() // Prevent slot click when clicking appointment
                                     const rect = e?.currentTarget.getBoundingClientRect()

@@ -1,23 +1,17 @@
 import { useState, useCallback, useEffect } from "react"
-import { Plus, Dog } from "lucide-react"
+import { Plus } from "lucide-react"
 import { useSearchParams } from "react-router-dom"
 import type { SortingState } from "@tanstack/react-table"
 import { petService } from "@/services/petService"
 import { toast } from "sonner"
 
-import { AppSidebar } from "@/components/app-sidebar"
+import { AppLayout } from "@/components/app-layout"
 import {
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbList,
   BreadcrumbPage,
 } from "@/components/ui/breadcrumb"
-import { Separator } from "@/components/ui/separator"
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
 import type { Pet } from "@/types/pet"
 import { PetsTable } from "@/components/data-table/pets-table"
@@ -214,55 +208,47 @@ export default function Pets() {
   }
 
   return (
-    <SidebarProvider>
-      <AppSidebar />
-      <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
-          <div className="flex items-center gap-2 px-4 w-full">
-            <SidebarTrigger className="-ml-1" />
-            <Separator
-              orientation="vertical"
-              className="mr-2 data-[orientation=vertical]:h-4"
-            />
-            <Breadcrumb>
-              <BreadcrumbList>
-                <BreadcrumbItem>
-                  <BreadcrumbPage>Pets</BreadcrumbPage>
-                </BreadcrumbItem>
-              </BreadcrumbList>
-            </Breadcrumb>
-            <div className="ml-auto">
-              <Button onClick={handleCreate} size="sm">
-                <Plus className="mr-2 h-4 w-4" />
-                Add Pet
-              </Button>
-            </div>
+    <AppLayout>
+      <header className="flex h-16 shrink-0 items-center gap-2">
+        <div className="flex items-center gap-2 px-4 sm:px-6 lg:px-8 w-full">
+          <Breadcrumb>
+            <BreadcrumbList>
+              <BreadcrumbItem>
+                <BreadcrumbPage>Pets</BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
+          <div className="ml-auto">
+            <Button onClick={handleCreate} size="sm">
+              <Plus className="mr-2 h-4 w-4" />
+              Add Pet
+            </Button>
           </div>
-        </header>
-
-        <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
-          {isLoading && pets.length === 0 ? (
-            <div className="flex items-center justify-center h-64">
-              <p className="text-muted-foreground">Loading pets...</p>
-            </div>
-          ) : (
-            <PetsTable
-              data={pets}
-              columns={petsColumns}
-              pageCount={Math.ceil(totalPets / currentPageSize)}
-              totalItems={totalPets}
-              currentPage={currentPage}
-              currentPageSize={currentPageSize}
-              onPaginationChange={handlePaginationChange}
-              onFilterChange={handleFilterChange}
-              sorting={sorting}
-              onSortingChange={handleSortingChange}
-              searchQuery={searchQuery}
-              onSearchChange={handleSearchChange}
-            />
-          )}
         </div>
-      </SidebarInset>
-    </SidebarProvider>
+      </header>
+
+      <div className="flex flex-1 flex-col gap-4 p-4 sm:px-6 lg:px-8 pt-0 w-full">
+        {isLoading && pets.length === 0 ? (
+          <div className="flex items-center justify-center h-64">
+            <p className="text-muted-foreground">Loading pets...</p>
+          </div>
+        ) : (
+          <PetsTable
+            data={pets}
+            columns={petsColumns}
+            pageCount={Math.ceil(totalPets / currentPageSize)}
+            totalItems={totalPets}
+            currentPage={currentPage}
+            currentPageSize={currentPageSize}
+            onPaginationChange={handlePaginationChange}
+            onFilterChange={handleFilterChange}
+            sorting={sorting}
+            onSortingChange={handleSortingChange}
+            searchQuery={searchQuery}
+            onSearchChange={handleSearchChange}
+          />
+        )}
+      </div>
+    </AppLayout>
   )
 }

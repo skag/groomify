@@ -12,6 +12,8 @@ import Appointments from './pages/Appointments'
 import Settings from './pages/Settings'
 import AccountSettings from './pages/settings/Account'
 import StaffSettings from './pages/settings/Staff'
+import GroomersSettings from './pages/settings/Groomers'
+import GroomerForm from './pages/settings/GroomerForm'
 import ServicesSettings from './pages/settings/Services'
 import AgreementsSettings from './pages/settings/Agreements'
 import RemindersSettings from './pages/settings/Reminders'
@@ -107,6 +109,9 @@ function App() {
             <Route index element={<Navigate to="/settings/account" replace />} />
             <Route path="account" element={<AccountSettings />} />
             <Route path="staff" element={<StaffSettings />} />
+            <Route path="groomers" element={<GroomersSettings />} />
+            <Route path="groomers/new" element={<GroomerForm />} />
+            <Route path="groomers/:id" element={<GroomerForm />} />
             <Route path="services" element={<ServicesSettings />} />
             <Route path="agreements" element={<AgreementsSettings />} />
             <Route path="reminders" element={<RemindersSettings />} />

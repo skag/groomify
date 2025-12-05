@@ -494,13 +494,10 @@ export function AppointmentsCalendar({
   // Determine if we're in edit mode
   const isEditMode = !!editingAppointment
 
-  const totalColumns = dates.length * groomers.length
-  const columnWidth = 150
   const minColumnWidth = 150
   const timeColumnWidth = 56
-
-  // In day view, columns should flex to fill available space
-  // In week view, columns have fixed width for horizontal scrolling
+  // In day view, columns expand to fill space
+  // In week view, columns also expand but have a minimum width
   const isDayView = viewMode === 'day'
 
   // Calculate selection overlay position for a groomer column
@@ -847,19 +844,15 @@ export function AppointmentsCalendar({
         </div>
 
         {/* Scrollable header content - synced with body horizontal scroll */}
-        <div ref={headerScrollRef} className={cn("flex-1", isDayView ? "overflow-hidden" : "overflow-hidden")}>
-          <div style={isDayView ? undefined : { width: totalColumns * columnWidth }}>
+        <div ref={headerScrollRef} className="flex-1 overflow-hidden">
+          <div className="flex flex-col min-w-full">
             {/* Date Header Row */}
             <div className="flex border-b bg-muted/30 h-[41px]">
               {dates.map((calDate) => (
                 <div
                   key={calDate.dateStr}
-                  className={cn(
-                    "text-center py-2 px-1 border-r last:border-r-0 font-semibold flex items-center justify-center",
-                    calDate.isToday && "bg-primary/10",
-                    isDayView && "flex-1"
-                  )}
-                  style={isDayView ? { minWidth: groomers.length * minColumnWidth } : { width: groomers.length * columnWidth }}
+                  className="text-center py-2 px-1 border-r last:border-r-0 font-semibold flex items-center justify-center flex-1"
+                  style={{ minWidth: groomers.length * minColumnWidth }}
                 >
                   <span className={cn(
                     "text-sm",
@@ -880,11 +873,10 @@ export function AppointmentsCalendar({
                     <div
                       key={`${calDate.dateStr}-${groomer.id}`}
                       className={cn(
-                        "text-center p-2 border-r last:border-r-0 flex items-center justify-center",
-                        calDate.isToday && "bg-primary/5",
-                        isDayView && "flex-1"
+                        "text-center p-2 border-r last:border-r-0 flex items-center justify-center flex-1",
+                        calDate.isToday && "bg-primary/5"
                       )}
-                      style={isDayView ? { minWidth: minColumnWidth } : { width: columnWidth }}
+                      style={{ minWidth: minColumnWidth }}
                     >
                       <div className="flex items-center justify-center gap-1">
                         <p className="text-xs font-medium truncate">{groomer.name}</p>
@@ -926,7 +918,7 @@ export function AppointmentsCalendar({
           onScroll={handleScroll}
         >
           {/* Column-based layout: render each groomer column with all time slots */}
-          <div ref={calendarBodyRef} className="flex" style={isDayView ? undefined : { width: totalColumns * columnWidth }}>
+          <div ref={calendarBodyRef} className="flex min-w-full">
             {dates.map((calDate) =>
               groomers.map((groomer) => {
                 const selectionOverlay = getSelectionOverlayForColumn(groomer.id, calDate.dateStr)
@@ -934,11 +926,8 @@ export function AppointmentsCalendar({
                 return (
                   <div
                     key={`${calDate.dateStr}-${groomer.id}`}
-                    className={cn(
-                      "relative border-r last:border-r-0",
-                      isDayView && "flex-1"
-                    )}
-                    style={isDayView ? { minWidth: minColumnWidth } : { width: columnWidth }}
+                    className="relative border-r last:border-r-0 flex-1"
+                    style={{ minWidth: minColumnWidth }}
                   >
                     {/* Single selection overlay for the entire column */}
                     {selectionOverlay && (

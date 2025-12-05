@@ -16,6 +16,7 @@ export const API_CONFIG = {
       get: (id: number) => `/api/business-users/${id}`,
       update: (id: number) => `/api/business-users/${id}`,
       delete: (id: number) => `/api/business-users/${id}`,
+      availability: (id: number) => `/api/business-users/${id}/availability`,
     },
     agreements: {
       list: '/api/agreements',

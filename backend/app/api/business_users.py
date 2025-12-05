@@ -14,6 +14,10 @@ from app.schemas.business_user import (
     BusinessUserCreate,
     BusinessUserUpdate,
 )
+from app.schemas.staff_availability import (
+    StaffAvailability as StaffAvailabilitySchema,
+    StaffAvailabilityBulkUpdate,
+)
 from app.services.business_user_service import (
     get_business_users,
     get_business_user_by_id,
@@ -21,6 +25,11 @@ from app.services.business_user_service import (
     update_business_user,
     delete_business_user,
     BusinessUserServiceError,
+)
+from app.services.staff_availability_service import (
+    get_staff_availability,
+    bulk_update_availability,
+    StaffAvailabilityServiceError,
 )
 from app.core.logger import get_logger
 
@@ -213,4 +222,94 @@ def delete_staff_member(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred while deleting staff member",
+        )
+
+
+# ============================================================================
+# Staff Availability Endpoints
+# ============================================================================
+
+
+@router.get(
+    "/{user_id}/availability",
+    response_model=list[StaffAvailabilitySchema],
+    summary="Get staff availability",
+    description="Get the weekly availability schedule for a staff member.",
+)
+def get_user_availability(
+    user_id: int,
+    business_id: BusinessId,
+    db: Session = Depends(get_db),
+) -> list[StaffAvailabilitySchema]:
+    """
+    Get all 7 days of availability for a staff member.
+
+    Returns an empty list if no availability has been set yet.
+    """
+    try:
+        availability = get_staff_availability(db, user_id, business_id)
+        return availability
+
+    except StaffAvailabilityServiceError as e:
+        logger.warning(f"Failed to get availability: {e}")
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(e),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    except Exception as e:
+        logger.error(f"Error fetching availability for user {user_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch availability",
+        )
+
+
+@router.put(
+    "/{user_id}/availability",
+    response_model=list[StaffAvailabilitySchema],
+    summary="Update staff availability",
+    description="Update the weekly availability schedule for a staff member (all 7 days).",
+)
+def update_user_availability(
+    user_id: int,
+    availability_data: StaffAvailabilityBulkUpdate,
+    current_user: OwnerOrStaffUser,
+    db: Session = Depends(get_db),
+) -> list[StaffAvailabilitySchema]:
+    """
+    Update all 7 days of availability for a staff member.
+
+    Requires owner or staff role.
+    Must provide availability for all 7 days (0=Monday through 6=Sunday).
+    """
+    try:
+        logger.info(f"Updating availability for staff member {user_id}")
+        availability = bulk_update_availability(
+            db, user_id, current_user.business_id, availability_data
+        )
+        return availability
+
+    except StaffAvailabilityServiceError as e:
+        logger.warning(f"Failed to update availability: {e}")
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(e),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+
+    except Exception as e:
+        logger.error(f"Error updating availability for user {user_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update availability",
         )

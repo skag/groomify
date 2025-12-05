@@ -159,6 +159,12 @@ def create_business_user(
         phone=user_data.phone,
         start_date=user_data.start_date,
         is_active=True,
+        # Compensation fields
+        compensation_type=user_data.compensation_type,
+        salary_rate=user_data.salary_rate,
+        salary_period=user_data.salary_period,
+        commission_percent=user_data.commission_percent,
+        tip_percent=user_data.tip_percent,
     )
 
     try:
@@ -239,6 +245,22 @@ def update_business_user(
 
     if user_data.is_active is not None:
         db_user.is_active = user_data.is_active
+
+    # Compensation fields
+    if user_data.compensation_type is not None:
+        db_user.compensation_type = user_data.compensation_type
+
+    if user_data.salary_rate is not None:
+        db_user.salary_rate = user_data.salary_rate
+
+    if user_data.salary_period is not None:
+        db_user.salary_period = user_data.salary_period
+
+    if user_data.commission_percent is not None:
+        db_user.commission_percent = user_data.commission_percent
+
+    if user_data.tip_percent is not None:
+        db_user.tip_percent = user_data.tip_percent
 
     try:
         db.commit()

@@ -1,6 +1,7 @@
 """Business user schemas"""
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Literal, Any
 from pydantic import BaseModel, EmailStr, Field, field_serializer
 
@@ -8,6 +9,8 @@ from app.models.business_user import BusinessUserRoleName, BusinessUserStatus
 
 
 RoleLiteral = Literal["owner", "staff", "groomer"]
+CompensationTypeLiteral = Literal["salary", "commission"]
+SalaryPeriodLiteral = Literal["hour", "week", "month"]
 
 
 class BusinessUserBase(BaseModel):
@@ -40,6 +43,13 @@ class BusinessUserCreate(BusinessUserBase):
     pin: str | None = Field(None, min_length=4, max_length=10)
     password: str | None = Field(None, min_length=8, max_length=100)
 
+    # Compensation fields (typically for groomers)
+    compensation_type: CompensationTypeLiteral | None = None
+    salary_rate: Decimal | None = Field(None, ge=0)
+    salary_period: SalaryPeriodLiteral | None = None
+    commission_percent: Decimal | None = Field(None, ge=0, le=100)
+    tip_percent: Decimal | None = Field(default=100, ge=0, le=100)
+
 
 class BusinessUserUpdate(BaseModel):
     """Schema for updating a business user"""
@@ -56,6 +66,13 @@ class BusinessUserUpdate(BaseModel):
     pin: str | None = Field(None, min_length=4, max_length=10)
     password: str | None = Field(None, min_length=8, max_length=100)
 
+    # Compensation fields (typically for groomers)
+    compensation_type: CompensationTypeLiteral | None = None
+    salary_rate: Decimal | None = Field(None, ge=0)
+    salary_period: SalaryPeriodLiteral | None = None
+    commission_percent: Decimal | None = Field(None, ge=0, le=100)
+    tip_percent: Decimal | None = Field(None, ge=0, le=100)
+
 
 class BusinessUser(BusinessUserBase):
     """Schema for business user response"""
@@ -68,6 +85,13 @@ class BusinessUser(BusinessUserBase):
     end_date: datetime | None
     created_at: datetime
     updated_at: datetime
+
+    # Compensation fields
+    compensation_type: str | None = None
+    salary_rate: Decimal | None = None
+    salary_period: str | None = None
+    commission_percent: Decimal | None = None
+    tip_percent: Decimal | None = None
 
     @field_serializer('role')
     def serialize_role(self, role: Any, _info) -> str:

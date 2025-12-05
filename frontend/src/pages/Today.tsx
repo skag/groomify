@@ -1,18 +1,7 @@
 import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
-import { AppSidebar } from "@/components/app-sidebar"
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbList,
-  BreadcrumbPage,
-} from "@/components/ui/breadcrumb"
+import { AppLayout } from "@/components/app-layout"
 import { Separator } from "@/components/ui/separator"
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
 import { Plus, Clock, Dog, User, Calendar, X, ExternalLink, CheckCircle2, XCircle, AlertCircle, Loader2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -343,57 +332,37 @@ export default function Today() {
 
   if (loading) {
     return (
-      <SidebarProvider>
-        <AppSidebar />
-        <SidebarInset>
-          <div className="flex items-center justify-center h-full">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-          </div>
-        </SidebarInset>
-      </SidebarProvider>
+      <AppLayout>
+        <div className="flex items-center justify-center h-full flex-1">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </AppLayout>
     )
   }
 
   if (error) {
     return (
-      <SidebarProvider>
-        <AppSidebar />
-        <SidebarInset>
-          <div className="flex flex-col items-center justify-center h-full gap-4">
-            <p className="text-destructive">{error}</p>
-            <Button onClick={() => window.location.reload()}>Retry</Button>
-          </div>
-        </SidebarInset>
-      </SidebarProvider>
+      <AppLayout>
+        <div className="flex flex-col items-center justify-center h-full flex-1 gap-4">
+          <p className="text-destructive">{error}</p>
+          <Button onClick={() => window.location.reload()}>Retry</Button>
+        </div>
+      </AppLayout>
     )
   }
 
   return (
-    <SidebarProvider>
-      <AppSidebar />
-      <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
-          <div className="flex items-center gap-2 px-4 w-full">
-            <SidebarTrigger className="-ml-1" />
-            <Separator
-              orientation="vertical"
-              className="mr-2 data-[orientation=vertical]:h-4"
-            />
-            <Breadcrumb>
-              <BreadcrumbList>
-                <BreadcrumbItem>
-                  <BreadcrumbPage>Today</BreadcrumbPage>
-                </BreadcrumbItem>
-              </BreadcrumbList>
-            </Breadcrumb>
-            <div className="ml-auto">
-              <Button onClick={handleBookAppointment} size="sm">
-                <Plus className="mr-2 h-4 w-4" />
-                Book Appointment
-              </Button>
-            </div>
+    <AppLayout>
+      <header className="flex h-12 shrink-0 items-center gap-2">
+        <div className="flex items-center gap-2 px-4 sm:px-6 lg:px-8 w-full">
+          <div className="ml-auto">
+            <Button onClick={handleBookAppointment} size="sm">
+              <Plus className="mr-2 h-4 w-4" />
+              Book Appointment
+            </Button>
           </div>
-        </header>
+        </div>
+      </header>
 
         <div className="flex flex-1 flex-col gap-4 p-6 pt-0">
           {/* Date Header */}
@@ -481,7 +450,6 @@ export default function Today() {
             })}
           </div>
         </div>
-      </SidebarInset>
 
       {/* Appointment Details Modal */}
       <Dialog open={!!selectedAppointment} onOpenChange={(open) => !open && handleCloseModal()}>
@@ -695,6 +663,6 @@ export default function Today() {
         appointment={cancelAppointment}
         onConfirmCancel={handleConfirmCancel}
       />
-    </SidebarProvider>
+    </AppLayout>
   )
 }

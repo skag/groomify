@@ -1,18 +1,6 @@
 import { useState, useEffect, useCallback } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
-import { AppSidebar } from "@/components/app-sidebar"
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbList,
-  BreadcrumbPage,
-} from "@/components/ui/breadcrumb"
-import { Separator } from "@/components/ui/separator"
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar"
+import { AppLayout } from "@/components/app-layout"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -700,39 +688,19 @@ export default function Appointments() {
 
   if (isLoadingPet) {
     return (
-      <SidebarProvider>
-        <AppSidebar />
-        <SidebarInset>
-          <div className="flex h-full items-center justify-center">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-          </div>
-        </SidebarInset>
-      </SidebarProvider>
+      <AppLayout>
+        <div className="flex h-full flex-1 items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </AppLayout>
     )
   }
 
   return (
-    <SidebarProvider>
-      <AppSidebar />
-      <SidebarInset className="flex flex-col overflow-hidden">
-        <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
-          <div className="flex items-center gap-2 px-4 w-full">
-            <SidebarTrigger className="-ml-1" />
-            <Separator
-              orientation="vertical"
-              className="mr-2 data-[orientation=vertical]:h-4"
-            />
-            <Breadcrumb>
-              <BreadcrumbList>
-                <BreadcrumbItem>
-                  <BreadcrumbPage>Appointments</BreadcrumbPage>
-                </BreadcrumbItem>
-              </BreadcrumbList>
-            </Breadcrumb>
-          </div>
-        </header>
+    <AppLayout>
+      <div className="flex flex-1 flex-col overflow-hidden">
 
-        <div className="flex flex-1 flex-col gap-4 p-6 pt-0 overflow-hidden">
+        <div className="flex flex-1 flex-col gap-4 p-6 overflow-hidden">
           {/* Pet Search / Selection / Reschedule Banner */}
           <div className="flex items-center gap-3 shrink-0">
             {rescheduleMode.active && rescheduleMode.originalAppointment ? (
@@ -1040,7 +1008,7 @@ export default function Appointments() {
             )}
           </div>
         </div>
-      </SidebarInset>
-    </SidebarProvider>
+      </div>
+    </AppLayout>
   )
 }

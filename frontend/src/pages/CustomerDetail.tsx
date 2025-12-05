@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { AppSidebar } from "@/components/app-sidebar"
+import { AppLayout } from "@/components/app-layout"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -9,12 +9,6 @@ import {
   BreadcrumbLink,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import { Separator } from "@/components/ui/separator"
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
 import { ArrowLeft, Plus } from "lucide-react"
 import { DetailedPetCard } from "@/components/DetailedPetCard"
@@ -248,29 +242,19 @@ export default function CustomerDetail() {
 
   if (isLoading || !customerData) {
     return (
-      <SidebarProvider>
-        <AppSidebar />
-        <SidebarInset>
-          <div className="flex items-center justify-center h-screen">
-            <p className="text-muted-foreground">Loading customer details...</p>
-          </div>
-        </SidebarInset>
-      </SidebarProvider>
+      <AppLayout>
+        <div className="flex items-center justify-center h-screen flex-1">
+          <p className="text-muted-foreground">Loading customer details...</p>
+        </div>
+      </AppLayout>
     )
   }
 
   return (
-    <SidebarProvider>
-      <AppSidebar />
-      <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
-          <div className="flex items-center gap-2 px-4 w-full">
-            <SidebarTrigger className="-ml-1" />
-            <Separator
-              orientation="vertical"
-              className="mr-2 data-[orientation=vertical]:h-4"
-            />
-            <Breadcrumb>
+    <AppLayout>
+      <header className="flex h-16 shrink-0 items-center gap-2">
+        <div className="flex items-center gap-2 px-4 sm:px-6 lg:px-8 w-full">
+          <Breadcrumb>
               <BreadcrumbList>
                 <BreadcrumbItem>
                   <BreadcrumbLink href="/customers">Customers</BreadcrumbLink>
@@ -279,18 +263,18 @@ export default function CustomerDetail() {
                 <BreadcrumbItem>
                   <BreadcrumbPage>{customerData.familyName}</BreadcrumbPage>
                 </BreadcrumbItem>
-              </BreadcrumbList>
-            </Breadcrumb>
-            <div className="ml-auto">
-              <Button variant="outline" size="sm" onClick={() => navigate('/customers')}>
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Back to Customers
-              </Button>
-            </div>
+            </BreadcrumbList>
+          </Breadcrumb>
+          <div className="ml-auto">
+            <Button variant="outline" size="sm" onClick={() => navigate('/customers')}>
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Customers
+            </Button>
           </div>
-        </header>
+        </div>
+      </header>
 
-        <div className="flex flex-1 flex-col gap-6 p-6 pt-0">
+      <div className="flex flex-1 flex-col gap-6 p-6 pt-0 w-full">
           {/* Family Name Header */}
           <h1 className="text-3xl font-bold">{customerData.familyName}</h1>
 
@@ -384,7 +368,6 @@ export default function CustomerDetail() {
               />
             </div>
           </div>
-        </div>
 
         {/* Add Contact Modal */}
         <Dialog open={isAddContactOpen} onOpenChange={setIsAddContactOpen}>
@@ -549,7 +532,7 @@ export default function CustomerDetail() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </SidebarInset>
-    </SidebarProvider>
+      </div>
+    </AppLayout>
   )
 }

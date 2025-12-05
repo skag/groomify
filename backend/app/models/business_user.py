@@ -1,7 +1,8 @@
 """Business user model (staff and owners)"""
 
 from datetime import datetime, timezone
-from sqlalchemy import String, DateTime, Boolean, ForeignKey, Enum as SQLEnum
+from decimal import Decimal
+from sqlalchemy import String, DateTime, Boolean, ForeignKey, Enum as SQLEnum, Numeric
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 import enum
 
@@ -67,6 +68,23 @@ class BusinessUser(Base):
     )
     end_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Compensation fields (typically used for groomers)
+    compensation_type: Mapped[str | None] = mapped_column(
+        String(20)
+    )  # "salary" | "commission"
+    salary_rate: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 2)
+    )  # e.g., 25.00 per hour/week/month
+    salary_period: Mapped[str | None] = mapped_column(
+        String(10)
+    )  # "hour" | "week" | "month"
+    commission_percent: Mapped[Decimal | None] = mapped_column(
+        Numeric(5, 2)
+    )  # e.g., 50.00 for 50%
+    tip_percent: Mapped[Decimal | None] = mapped_column(
+        Numeric(5, 2), default=100
+    )  # default 100% of tips
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -84,6 +102,9 @@ class BusinessUser(Base):
     )
     services: Mapped[list["Service"]] = relationship(
         secondary="service_staff", back_populates="staff_members"
+    )
+    availability: Mapped[list["StaffAvailability"]] = relationship(
+        back_populates="business_user", cascade="all, delete-orphan"
     )
 
     @property

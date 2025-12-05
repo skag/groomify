@@ -1,84 +1,75 @@
 import { useState, useCallback, useEffect } from "react"
-import { Plus, Users as UsersIcon } from "lucide-react"
+import { Plus } from "lucide-react"
 import { useSearchParams, useNavigate } from "react-router-dom"
 import type { SortingState } from "@tanstack/react-table"
 
-import { AppSidebar } from "@/components/app-sidebar"
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbList,
-  BreadcrumbPage,
-} from "@/components/ui/breadcrumb"
-import { Separator } from "@/components/ui/separator"
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar"
+import { AppLayout } from "@/components/app-layout"
 import { Button } from "@/components/ui/button"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { Customer } from "@/types/customer"
+import type { Pet } from "@/types/pet"
 import { CustomersTable } from "@/components/data-table/customers-table"
 import { customersColumns } from "@/components/data-table/customers-columns"
-import { mockCustomers } from "@/data/mockCustomers"
+import { PetsTable } from "@/components/data-table/pets-table"
+import { petsColumns } from "@/components/data-table/pets-columns"
 import { customerService } from "@/services/customerService"
+import { petService } from "@/services/petService"
 import { toast } from "sonner"
 
 export default function Customers() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
 
-  // Initialize state from URL params
+  // Get active tab from URL, default to "customers"
+  const activeTab = searchParams.get('tab') || 'customers'
+
+  // Customer state
   const [customers, setCustomers] = useState<Customer[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoadingCustomers, setIsLoadingCustomers] = useState(true)
   const [totalCustomers, setTotalCustomers] = useState(0)
 
-  // Get initial values from URL or defaults
-  const initialPage = parseInt(searchParams.get('page') || '0')
-  const initialPageSize = parseInt(searchParams.get('pageSize') || '20')
-  const initialSearch = searchParams.get('search') || ''
-  const initialSortBy = searchParams.get('sortBy') || 'account'
-  const initialSortOrder = searchParams.get('sortOrder') === 'desc'
-  const initialStatuses = searchParams.get('statuses')?.split(',').filter(Boolean) || []
+  // Pet state
+  const [pets, setPets] = useState<Pet[]>([])
+  const [isLoadingPets, setIsLoadingPets] = useState(true)
+  const [totalPets, setTotalPets] = useState(0)
 
-  const [statusFilter, setStatusFilter] = useState<string[]>(initialStatuses)
-  const [sorting, setSorting] = useState<SortingState>([{ id: initialSortBy, desc: initialSortOrder }])
-  const [searchQuery, setSearchQuery] = useState<string>(initialSearch)
-  const [currentPage, setCurrentPage] = useState(initialPage)
-  const [currentPageSize, setCurrentPageSize] = useState(initialPageSize)
+  // Customer pagination/filter state
+  const initialCustomerPage = parseInt(searchParams.get('customerPage') || '0')
+  const initialCustomerPageSize = parseInt(searchParams.get('customerPageSize') || '20')
+  const initialCustomerSearch = searchParams.get('customerSearch') || ''
+  const initialCustomerSortBy = searchParams.get('customerSortBy') || 'account'
+  const initialCustomerSortOrder = searchParams.get('customerSortOrder') === 'desc'
+  const initialCustomerStatuses = searchParams.get('customerStatuses')?.split(',').filter(Boolean) || []
 
-  // Initialize URL params on first load if they don't exist
-  useEffect(() => {
-    const hasParams = searchParams.toString().length > 0
-    if (!hasParams) {
-      const newParams = new URLSearchParams()
-      newParams.set('page', '0')
-      newParams.set('pageSize', '20')
-      newParams.set('sortBy', 'account')
-      newParams.set('sortOrder', 'asc')
-      setSearchParams(newParams, { replace: true })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  const [customerStatusFilter, setCustomerStatusFilter] = useState<string[]>(initialCustomerStatuses)
+  const [customerSorting, setCustomerSorting] = useState<SortingState>([{ id: initialCustomerSortBy, desc: initialCustomerSortOrder }])
+  const [customerSearchQuery, setCustomerSearchQuery] = useState<string>(initialCustomerSearch)
+  const [customerCurrentPage, setCustomerCurrentPage] = useState(initialCustomerPage)
+  const [customerCurrentPageSize, setCustomerCurrentPageSize] = useState(initialCustomerPageSize)
 
-  // Sync state with URL params when they change (e.g., browser back/forward)
-  useEffect(() => {
-    const page = parseInt(searchParams.get('page') || '0')
-    const pageSize = parseInt(searchParams.get('pageSize') || '20')
-    const search = searchParams.get('search') || ''
-    const sortBy = searchParams.get('sortBy') || 'account'
-    const sortOrder = searchParams.get('sortOrder') === 'desc'
-    const statuses = searchParams.get('statuses')?.split(',').filter(Boolean) || []
+  // Pet pagination/filter state
+  const initialPetPage = parseInt(searchParams.get('petPage') || '0')
+  const initialPetPageSize = parseInt(searchParams.get('petPageSize') || '20')
+  const initialPetSearch = searchParams.get('petSearch') || ''
+  const initialPetSortBy = searchParams.get('petSortBy') || 'name'
+  const initialPetSortOrder = searchParams.get('petSortOrder') === 'desc'
+  const initialPetStatuses = searchParams.get('petStatuses')?.split(',').filter(Boolean) || []
 
-    setCurrentPage(page)
-    setCurrentPageSize(pageSize)
-    setSearchQuery(search)
-    setSorting([{ id: sortBy, desc: sortOrder }])
-    setStatusFilter(statuses)
-  }, [searchParams])
+  const [petStatusFilter, setPetStatusFilter] = useState<string[]>(initialPetStatuses)
+  const [petSorting, setPetSorting] = useState<SortingState>([{ id: initialPetSortBy, desc: initialPetSortOrder }])
+  const [petSearchQuery, setPetSearchQuery] = useState<string>(initialPetSearch)
+  const [petCurrentPage, setPetCurrentPage] = useState(initialPetPage)
+  const [petCurrentPageSize, setPetCurrentPageSize] = useState(initialPetPageSize)
 
-  // Update URL params whenever state changes
-  const updateUrlParams = useCallback((params: {
+  // Handle tab change
+  const handleTabChange = (value: string) => {
+    const newParams = new URLSearchParams(searchParams)
+    newParams.set('tab', value)
+    setSearchParams(newParams, { replace: true })
+  }
+
+  // Update URL params for customers
+  const updateCustomerUrlParams = useCallback((params: {
     page?: number
     pageSize?: number
     search?: string
@@ -88,22 +79,55 @@ export default function Customers() {
   }) => {
     const newParams = new URLSearchParams(searchParams)
 
-    if (params.page !== undefined) newParams.set('page', params.page.toString())
-    if (params.pageSize !== undefined) newParams.set('pageSize', params.pageSize.toString())
+    if (params.page !== undefined) newParams.set('customerPage', params.page.toString())
+    if (params.pageSize !== undefined) newParams.set('customerPageSize', params.pageSize.toString())
     if (params.search !== undefined) {
       if (params.search) {
-        newParams.set('search', params.search)
+        newParams.set('customerSearch', params.search)
       } else {
-        newParams.delete('search')
+        newParams.delete('customerSearch')
       }
     }
-    if (params.sortBy !== undefined) newParams.set('sortBy', params.sortBy)
-    if (params.sortOrder !== undefined) newParams.set('sortOrder', params.sortOrder)
+    if (params.sortBy !== undefined) newParams.set('customerSortBy', params.sortBy)
+    if (params.sortOrder !== undefined) newParams.set('customerSortOrder', params.sortOrder)
     if (params.statuses !== undefined) {
       if (params.statuses.length > 0) {
-        newParams.set('statuses', params.statuses.join(','))
+        newParams.set('customerStatuses', params.statuses.join(','))
       } else {
-        newParams.delete('statuses')
+        newParams.delete('customerStatuses')
+      }
+    }
+
+    setSearchParams(newParams, { replace: true })
+  }, [searchParams, setSearchParams])
+
+  // Update URL params for pets
+  const updatePetUrlParams = useCallback((params: {
+    page?: number
+    pageSize?: number
+    search?: string
+    sortBy?: string
+    sortOrder?: string
+    statuses?: string[]
+  }) => {
+    const newParams = new URLSearchParams(searchParams)
+
+    if (params.page !== undefined) newParams.set('petPage', params.page.toString())
+    if (params.pageSize !== undefined) newParams.set('petPageSize', params.pageSize.toString())
+    if (params.search !== undefined) {
+      if (params.search) {
+        newParams.set('petSearch', params.search)
+      } else {
+        newParams.delete('petSearch')
+      }
+    }
+    if (params.sortBy !== undefined) newParams.set('petSortBy', params.sortBy)
+    if (params.sortOrder !== undefined) newParams.set('petSortOrder', params.sortOrder)
+    if (params.statuses !== undefined) {
+      if (params.statuses.length > 0) {
+        newParams.set('petStatuses', params.statuses.join(','))
+      } else {
+        newParams.delete('petStatuses')
       }
     }
 
@@ -113,12 +137,10 @@ export default function Customers() {
   // Fetch customers function
   const loadCustomers = useCallback(async (page: number, perPage: number, statuses?: string[], search?: string) => {
     try {
-      setIsLoading(true)
+      setIsLoadingCustomers(true)
 
-      // Fetch from API
       const apiCustomers = await customerService.getAllCustomers()
 
-      // Transform API data to match table format
       let transformedCustomers: Customer[] = apiCustomers.map(apiCustomer => {
         const primaryContact = apiCustomer.customer_users.find(cu => cu.is_primary_contact) || apiCustomer.customer_users[0]
 
@@ -131,19 +153,17 @@ export default function Customers() {
             phone: primaryContact?.phone || '',
           },
           pets: apiCustomer.pets.length,
-          lastAppointment: null, // TODO: Get from appointments
-          nextAppointment: null, // TODO: Get from appointments
-          due: 0, // TODO: Calculate from last appointment
+          lastAppointment: null,
+          nextAppointment: null,
+          due: 0,
           status: apiCustomer.status as "active" | "inactive",
         }
       })
 
-      // Apply status filter
       if (statuses && statuses.length > 0) {
         transformedCustomers = transformedCustomers.filter(c => statuses.includes(c.status))
       }
 
-      // Apply search filter
       if (search) {
         const searchLower = search.toLowerCase()
         transformedCustomers = transformedCustomers.filter(c =>
@@ -153,9 +173,8 @@ export default function Customers() {
         )
       }
 
-      // Apply sorting
-      const sortBy = sorting[0]?.id || 'account'
-      const sortOrder = sorting[0]?.desc ? -1 : 1
+      const sortBy = customerSorting[0]?.id || 'account'
+      const sortOrder = customerSorting[0]?.desc ? -1 : 1
       transformedCustomers.sort((a, b) => {
         let aVal: any = a[sortBy as keyof Customer]
         let bVal: any = b[sortBy as keyof Customer]
@@ -170,7 +189,6 @@ export default function Customers() {
         return 0
       })
 
-      // Apply pagination
       const start = page * perPage
       const end = start + perPage
       const paginatedCustomers = transformedCustomers.slice(start, end)
@@ -183,99 +201,214 @@ export default function Customers() {
       setCustomers([])
       setTotalCustomers(0)
     } finally {
-      setIsLoading(false)
+      setIsLoadingCustomers(false)
     }
-  }, [sorting])
+  }, [customerSorting])
 
-  // Handle pagination change from table
-  const handlePaginationChange = useCallback((pageIndex: number, pageSize: number) => {
-    setCurrentPage(pageIndex)
-    setCurrentPageSize(pageSize)
-    updateUrlParams({ page: pageIndex, pageSize })
-  }, [updateUrlParams])
+  // Fetch pets function
+  const loadPets = useCallback(async (page: number, perPage: number, statuses?: string[], search?: string) => {
+    try {
+      setIsLoadingPets(true)
 
-  // Handle filter change from table
-  const handleFilterChange = useCallback((statuses: string[]) => {
-    setStatusFilter(statuses)
-    setCurrentPage(0)
-    updateUrlParams({ page: 0, statuses })
-  }, [updateUrlParams])
+      const apiPets = await petService.getAllPets()
 
-  // Handle sorting change from table
-  const handleSortingChange = useCallback((newSorting: SortingState) => {
-    setSorting(newSorting)
+      let transformedPets: Pet[] = apiPets.map(pet => ({
+        id: pet.id.toString(),
+        name: pet.name,
+        accountName: pet.account_name || "",
+        accountId: pet.customer_id.toString(),
+        breed: pet.breed || pet.species,
+        lastGroomed: null,
+        nextGrooming: null,
+        overdue: 0,
+        notes: pet.special_notes || "",
+        status: "active" as const,
+      }))
+
+      if (statuses && statuses.length > 0) {
+        transformedPets = transformedPets.filter(p => statuses.includes(p.status))
+      }
+
+      if (search) {
+        const searchLower = search.toLowerCase()
+        transformedPets = transformedPets.filter(p =>
+          p.name.toLowerCase().includes(searchLower) ||
+          p.breed.toLowerCase().includes(searchLower) ||
+          p.accountName.toLowerCase().includes(searchLower)
+        )
+      }
+
+      const sortBy = petSorting[0]?.id || 'name'
+      const sortOrder = petSorting[0]?.desc ? -1 : 1
+      transformedPets.sort((a, b) => {
+        let aVal: any = a[sortBy as keyof Pet]
+        let bVal: any = b[sortBy as keyof Pet]
+
+        if (aVal < bVal) return -1 * sortOrder
+        if (aVal > bVal) return 1 * sortOrder
+        return 0
+      })
+
+      const start = page * perPage
+      const end = start + perPage
+      const paginatedPets = transformedPets.slice(start, end)
+
+      setPets(paginatedPets)
+      setTotalPets(transformedPets.length)
+    } catch (error) {
+      console.error('Error fetching pets:', error)
+      toast.error('Failed to load pets')
+      setPets([])
+      setTotalPets(0)
+    } finally {
+      setIsLoadingPets(false)
+    }
+  }, [petSorting])
+
+  // Customer handlers
+  const handleCustomerPaginationChange = useCallback((pageIndex: number, pageSize: number) => {
+    setCustomerCurrentPage(pageIndex)
+    setCustomerCurrentPageSize(pageSize)
+    updateCustomerUrlParams({ page: pageIndex, pageSize })
+  }, [updateCustomerUrlParams])
+
+  const handleCustomerFilterChange = useCallback((statuses: string[]) => {
+    setCustomerStatusFilter(statuses)
+    setCustomerCurrentPage(0)
+    updateCustomerUrlParams({ page: 0, statuses })
+  }, [updateCustomerUrlParams])
+
+  const handleCustomerSortingChange = useCallback((newSorting: SortingState) => {
+    setCustomerSorting(newSorting)
     const sortBy = newSorting[0]?.id || 'account'
     const sortOrder = newSorting[0]?.desc ? 'desc' : 'asc'
-    updateUrlParams({ sortBy, sortOrder })
-  }, [updateUrlParams])
+    updateCustomerUrlParams({ sortBy, sortOrder })
+  }, [updateCustomerUrlParams])
 
-  // Handle search change from toolbar
-  const handleSearchChange = useCallback((search: string) => {
-    setSearchQuery(search)
-    setCurrentPage(0)
-    updateUrlParams({ page: 0, search })
-  }, [updateUrlParams])
+  const handleCustomerSearchChange = useCallback((search: string) => {
+    setCustomerSearchQuery(search)
+    setCustomerCurrentPage(0)
+    updateCustomerUrlParams({ page: 0, search })
+  }, [updateCustomerUrlParams])
 
-  // Load customers when URL params change
+  // Pet handlers
+  const handlePetPaginationChange = useCallback((pageIndex: number, pageSize: number) => {
+    setPetCurrentPage(pageIndex)
+    setPetCurrentPageSize(pageSize)
+    updatePetUrlParams({ page: pageIndex, pageSize })
+  }, [updatePetUrlParams])
+
+  const handlePetFilterChange = useCallback((statuses: string[]) => {
+    setPetStatusFilter(statuses)
+    setPetCurrentPage(0)
+    updatePetUrlParams({ page: 0, statuses })
+  }, [updatePetUrlParams])
+
+  const handlePetSortingChange = useCallback((newSorting: SortingState) => {
+    setPetSorting(newSorting)
+    const sortBy = newSorting[0]?.id || 'name'
+    const sortOrder = newSorting[0]?.desc ? 'desc' : 'asc'
+    updatePetUrlParams({ sortBy, sortOrder })
+  }, [updatePetUrlParams])
+
+  const handlePetSearchChange = useCallback((search: string) => {
+    setPetSearchQuery(search)
+    setPetCurrentPage(0)
+    updatePetUrlParams({ page: 0, search })
+  }, [updatePetUrlParams])
+
+  // Load customers when their params change
   useEffect(() => {
-    loadCustomers(currentPage, currentPageSize, statusFilter, searchQuery)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, currentPageSize, statusFilter, searchQuery, sorting])
+    loadCustomers(customerCurrentPage, customerCurrentPageSize, customerStatusFilter, customerSearchQuery)
+  }, [customerCurrentPage, customerCurrentPageSize, customerStatusFilter, customerSearchQuery, customerSorting, loadCustomers])
 
-  const handleCreate = () => {
+  // Load pets when their params change
+  useEffect(() => {
+    loadPets(petCurrentPage, petCurrentPageSize, petStatusFilter, petSearchQuery)
+  }, [petCurrentPage, petCurrentPageSize, petStatusFilter, petSearchQuery, petSorting, loadPets])
+
+  const handleCreateCustomer = () => {
     navigate('/customers/add')
   }
 
+  const handleCreatePet = () => {
+    alert('Create pet functionality would go here')
+  }
+
   return (
-    <SidebarProvider>
-      <AppSidebar />
-      <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
-          <div className="flex items-center gap-2 px-4 w-full">
-            <SidebarTrigger className="-ml-1" />
-            <Separator
-              orientation="vertical"
-              className="mr-2 data-[orientation=vertical]:h-4"
-            />
-            <Breadcrumb>
-              <BreadcrumbList>
-                <BreadcrumbItem>
-                  <BreadcrumbPage>Customers</BreadcrumbPage>
-                </BreadcrumbItem>
-              </BreadcrumbList>
-            </Breadcrumb>
-            <div className="ml-auto">
-              <Button onClick={handleCreate} size="sm">
+    <AppLayout>
+      <header className="flex h-12 shrink-0 items-center gap-2">
+        <div className="flex items-center gap-2 px-4 sm:px-6 lg:px-8 w-full">
+          <div className="ml-auto">
+            {activeTab === 'customers' ? (
+              <Button onClick={handleCreateCustomer} size="sm">
                 <Plus className="mr-2 h-4 w-4" />
                 Add Customer
               </Button>
-            </div>
+            ) : (
+              <Button onClick={handleCreatePet} size="sm">
+                <Plus className="mr-2 h-4 w-4" />
+                Add Pet
+              </Button>
+            )}
           </div>
-        </header>
-
-        <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
-          {isLoading && customers.length === 0 ? (
-            <div className="flex items-center justify-center h-64">
-              <p className="text-muted-foreground">Loading customers...</p>
-            </div>
-          ) : (
-            <CustomersTable
-              data={customers}
-              columns={customersColumns}
-              pageCount={Math.ceil(totalCustomers / currentPageSize)}
-              totalItems={totalCustomers}
-              currentPage={currentPage}
-              currentPageSize={currentPageSize}
-              onPaginationChange={handlePaginationChange}
-              onFilterChange={handleFilterChange}
-              sorting={sorting}
-              onSortingChange={handleSortingChange}
-              searchQuery={searchQuery}
-              onSearchChange={handleSearchChange}
-            />
-          )}
         </div>
-      </SidebarInset>
-    </SidebarProvider>
+      </header>
+
+      <div className="flex flex-1 flex-col gap-4 p-4 sm:px-6 lg:px-8 pt-0 w-full">
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="flex-1 flex flex-col">
+          <TabsList>
+            <TabsTrigger value="customers">Customers</TabsTrigger>
+            <TabsTrigger value="pets">Pets</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="customers" className="flex-1">
+            {isLoadingCustomers && customers.length === 0 ? (
+              <div className="flex items-center justify-center h-64">
+                <p className="text-muted-foreground">Loading customers...</p>
+              </div>
+            ) : (
+              <CustomersTable
+                data={customers}
+                columns={customersColumns}
+                pageCount={Math.ceil(totalCustomers / customerCurrentPageSize)}
+                totalItems={totalCustomers}
+                currentPage={customerCurrentPage}
+                currentPageSize={customerCurrentPageSize}
+                onPaginationChange={handleCustomerPaginationChange}
+                onFilterChange={handleCustomerFilterChange}
+                sorting={customerSorting}
+                onSortingChange={handleCustomerSortingChange}
+                searchQuery={customerSearchQuery}
+                onSearchChange={handleCustomerSearchChange}
+              />
+            )}
+          </TabsContent>
+
+          <TabsContent value="pets" className="flex-1">
+            {isLoadingPets && pets.length === 0 ? (
+              <div className="flex items-center justify-center h-64">
+                <p className="text-muted-foreground">Loading pets...</p>
+              </div>
+            ) : (
+              <PetsTable
+                data={pets}
+                columns={petsColumns}
+                pageCount={Math.ceil(totalPets / petCurrentPageSize)}
+                totalItems={totalPets}
+                currentPage={petCurrentPage}
+                currentPageSize={petCurrentPageSize}
+                onPaginationChange={handlePetPaginationChange}
+                onFilterChange={handlePetFilterChange}
+                sorting={petSorting}
+                onSortingChange={handlePetSortingChange}
+                searchQuery={petSearchQuery}
+                onSearchChange={handlePetSearchChange}
+              />
+            )}
+          </TabsContent>
+        </Tabs>
+      </div>
+    </AppLayout>
   )
 }

@@ -9,6 +9,7 @@ import {
   Plug,
   ArrowLeft,
   Scissors,
+  Dog,
 } from "lucide-react"
 
 import { NavMain } from "@/components/nav-main"
@@ -42,6 +43,12 @@ const data = {
       title: "Staff",
       url: "/settings/staff",
       icon: Users,
+      items: [],
+    },
+    {
+      title: "Groomers",
+      url: "/settings/groomers",
+      icon: Dog,
       items: [],
     },
     {

@@ -9,6 +9,8 @@ import type {
   StaffMember,
   CreateStaffRequest,
   UpdateStaffRequest,
+  StaffAvailability,
+  StaffAvailabilityBulkUpdate,
 } from '@/types/staff';
 
 export const staffService = {
@@ -66,5 +68,33 @@ export const staffService = {
     return api.delete<StaffMember>(API_CONFIG.endpoints.staff.delete(id), {
       requiresAuth: true,
     });
+  },
+
+  /**
+   * Get staff member availability (work hours)
+   */
+  getAvailability: async (staffId: number): Promise<StaffAvailability[]> => {
+    return api.get<StaffAvailability[]>(
+      API_CONFIG.endpoints.staff.availability(staffId),
+      {
+        requiresAuth: true,
+      }
+    );
+  },
+
+  /**
+   * Update staff member availability (all 7 days)
+   */
+  updateAvailability: async (
+    staffId: number,
+    data: StaffAvailabilityBulkUpdate
+  ): Promise<StaffAvailability[]> => {
+    return api.put<StaffAvailability[]>(
+      API_CONFIG.endpoints.staff.availability(staffId),
+      data,
+      {
+        requiresAuth: true,
+      }
+    );
   },
 };

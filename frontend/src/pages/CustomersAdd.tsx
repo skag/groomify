@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { ArrowLeft, Sparkles } from "lucide-react"
 import { toast } from "sonner"
 
-import { AppSidebar } from "@/components/app-sidebar"
+import { AppLayout } from "@/components/app-layout"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -12,12 +12,6 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import { Separator } from "@/components/ui/separator"
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -183,72 +177,65 @@ export default function CustomersAdd() {
   }
 
   return (
-    <SidebarProvider>
-      <AppSidebar />
-      <SidebarInset>
-        <style>{`
-          @keyframes slideInUp {
-            from {
-              opacity: 0;
-              transform: translateY(10px);
-            }
-            to {
-              opacity: 1;
-              transform: translateY(0);
-            }
+    <AppLayout>
+      <style>{`
+        @keyframes slideInUp {
+          from {
+            opacity: 0;
+            transform: translateY(10px);
           }
-
-          .form-section {
-            animation: slideInUp 0.4s ease-out backwards;
+          to {
+            opacity: 1;
+            transform: translateY(0);
           }
+        }
 
-          .form-section:nth-child(1) {
-            animation-delay: 0.1s;
-          }
+        .form-section {
+          animation: slideInUp 0.4s ease-out backwards;
+        }
 
-          .form-section:nth-child(2) {
-            animation-delay: 0.2s;
-          }
+        .form-section:nth-child(1) {
+          animation-delay: 0.1s;
+        }
 
-          .form-section:nth-child(3) {
-            animation-delay: 0.3s;
-          }
+        .form-section:nth-child(2) {
+          animation-delay: 0.2s;
+        }
 
-          .field-label {
-            font-size: 0.8125rem;
-            font-weight: 500;
-            letter-spacing: 0.01em;
-            color: hsl(var(--foreground) / 0.7);
-            transition: color 0.2s;
-          }
+        .form-section:nth-child(3) {
+          animation-delay: 0.3s;
+        }
 
-          .field-input:focus-within .field-label {
-            color: hsl(var(--foreground));
-          }
+        .field-label {
+          font-size: 0.8125rem;
+          font-weight: 500;
+          letter-spacing: 0.01em;
+          color: hsl(var(--foreground) / 0.7);
+          transition: color 0.2s;
+        }
 
-          .required-badge {
-            display: inline-flex;
-            align-items: center;
-            padding: 0.125rem 0.5rem;
-            font-size: 0.6875rem;
-            font-weight: 500;
-            letter-spacing: 0.05em;
-            text-transform: uppercase;
-            background: hsl(var(--muted));
-            color: hsl(var(--muted-foreground));
-            border-radius: 0.25rem;
-            margin-left: 0.5rem;
-          }
-        `}</style>
+        .field-input:focus-within .field-label {
+          color: hsl(var(--foreground));
+        }
 
-        <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
-          <div className="flex items-center gap-2 px-4 w-full">
-            <SidebarTrigger className="-ml-1" />
-            <Separator
-              orientation="vertical"
-              className="mr-2 data-[orientation=vertical]:h-4"
-            />
-            <Breadcrumb>
+        .required-badge {
+          display: inline-flex;
+          align-items: center;
+          padding: 0.125rem 0.5rem;
+          font-size: 0.6875rem;
+          font-weight: 500;
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
+          background: hsl(var(--muted));
+          color: hsl(var(--muted-foreground));
+          border-radius: 0.25rem;
+          margin-left: 0.5rem;
+        }
+      `}</style>
+
+      <header className="flex h-16 shrink-0 items-center gap-2">
+        <div className="flex items-center gap-2 px-4 sm:px-6 lg:px-8 w-full">
+          <Breadcrumb>
               <BreadcrumbList>
                 <BreadcrumbItem>
                   <BreadcrumbLink href="/customers">Customers</BreadcrumbLink>
@@ -257,12 +244,12 @@ export default function CustomersAdd() {
                 <BreadcrumbItem>
                   <BreadcrumbPage>Add Customer</BreadcrumbPage>
                 </BreadcrumbItem>
-              </BreadcrumbList>
-            </Breadcrumb>
-          </div>
-        </header>
+            </BreadcrumbList>
+          </Breadcrumb>
+        </div>
+      </header>
 
-        <div className="flex flex-1 flex-col gap-6 p-6 pt-2">
+      <div className="flex flex-1 flex-col gap-6 p-6 pt-2 max-w-7xl mx-auto w-full">
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-semibold tracking-tight">New Customer</h1>
@@ -534,7 +521,6 @@ export default function CustomersAdd() {
             </div>
           </form>
         </div>
-      </SidebarInset>
-    </SidebarProvider>
+    </AppLayout>
   )
 }

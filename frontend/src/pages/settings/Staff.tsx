@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Plus, Pencil, Trash2 } from "lucide-react"
 import {
@@ -201,74 +200,64 @@ export default function StaffSettings() {
         </div>
         <Button onClick={openAddModal}>
           <Plus className="mr-2 h-4 w-4" />
-          Add Staff Member
+          Add Staff
         </Button>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Team Members</CardTitle>
-          <CardDescription>
-            View and manage your staff members
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {staffMembers.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              No staff members found. Add your first team member to get started.
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {staffMembers.map((member) => (
-                <div
-                  key={member.id}
-                  className="flex items-center justify-between p-4 border rounded-lg"
-                >
-                  <div className="space-y-1 flex-1">
-                    <h3 className="font-semibold">
-                      {member.first_name} {member.last_name}
-                    </h3>
-                    <div className="flex flex-col gap-1 text-sm text-muted-foreground">
-                      <span>{member.email}</span>
-                      {member.phone && <span>{member.phone}</span>}
-                      <span>Started: {formatDate(member.start_date)}</span>
-                      <span className={`inline-flex w-fit items-center px-2 py-0.5 rounded text-xs ${
-                        member.is_active ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"
-                      }`}>
-                        {member.is_active ? "Active" : "Inactive"}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium border ${getRoleBadgeColor(member.role)}`}
-                    >
-                      {member.role ? member.role.charAt(0).toUpperCase() + member.role.slice(1) : 'Unknown'}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => openEditModal(member)}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    {member.role !== "owner" && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDelete(member)}
-                        disabled={isDeleting}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
+      {staffMembers.filter(m => m.role !== "groomer").length === 0 ? (
+        <div className="text-center py-8 text-muted-foreground">
+          No staff members found. Add your first team member to get started.
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {staffMembers.filter(m => m.role !== "groomer").map((member) => (
+            <div
+              key={member.id}
+              className="flex items-center justify-between p-4 border rounded-lg"
+            >
+              <div className="space-y-1 flex-1">
+                <h3 className="font-semibold">
+                  {member.first_name} {member.last_name}
+                </h3>
+                <div className="flex flex-col gap-1 text-sm text-muted-foreground">
+                  <span>{member.email}</span>
+                  {member.phone && <span>{member.phone}</span>}
+                  <span>Started: {formatDate(member.start_date)}</span>
+                  <span className={`inline-flex w-fit items-center px-2 py-0.5 rounded text-xs ${
+                    member.is_active ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"
+                  }`}>
+                    {member.is_active ? "Active" : "Inactive"}
+                  </span>
                 </div>
-              ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <span
+                  className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium border ${getRoleBadgeColor(member.role)}`}
+                >
+                  {member.role ? member.role.charAt(0).toUpperCase() + member.role.slice(1) : 'Unknown'}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openEditModal(member)}
+                >
+                  <Pencil className="h-4 w-4" />
+                </Button>
+                {member.role !== "owner" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleDelete(member)}
+                    disabled={isDeleting}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          ))}
+        </div>
+      )}
 
       {/* Add/Edit Staff Modal */}
       <Dialog open={isModalOpen} onOpenChange={(open) => {
@@ -278,12 +267,12 @@ export default function StaffSettings() {
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle>
-              {editingStaff ? "Edit Staff Member" : "Add Staff Member"}
+              {editingStaff ? "Edit Staff Member" : "Add Staff"}
             </DialogTitle>
             <DialogDescription>
               {editingStaff
                 ? "Update the staff member's information"
-                : "Add a new team member to your staff"}
+                : "Add a new staff member to your team. For groomers, use the Groomers section."}
             </DialogDescription>
           </DialogHeader>
 
@@ -361,7 +350,10 @@ export default function StaffSettings() {
                   <SelectContent>
                     <SelectItem value="owner">Owner</SelectItem>
                     <SelectItem value="staff">Staff</SelectItem>
-                    <SelectItem value="groomer">Groomer</SelectItem>
+                    {/* Only show groomer option when editing an existing groomer */}
+                    {editingStaff?.role === "groomer" && (
+                      <SelectItem value="groomer">Groomer</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -386,7 +378,7 @@ export default function StaffSettings() {
               Cancel
             </Button>
             <Button onClick={handleSubmit} disabled={isLoading}>
-              {isLoading ? "Saving..." : (editingStaff ? "Update" : "Add")} Staff Member
+              {isLoading ? "Saving..." : (editingStaff ? "Update" : "Add Staff")}
             </Button>
           </DialogFooter>
         </DialogContent>

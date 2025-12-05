@@ -7,6 +7,7 @@ requires-python = ">=3.10"
 dependencies = [
     "alembic>=1.17.2",
     "bcrypt>=4.0.1",
+    "cryptography>=44.0.0",
     "email-validator>=2.0.0",
     "faker>=38.2.0",
     "fastapi>=0.123.5",
@@ -21,5 +22,6 @@ dependencies = [
     "python-multipart>=0.0.20",
     "ruff>=0.14.7",
     "sqlalchemy>=2.0.44",
+    "squareup>=43.0.0.20241218",
     "uvicorn>=0.38.0",
 ]

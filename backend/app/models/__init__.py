@@ -18,6 +18,10 @@ from app.models.service_category import ServiceCategory
 from app.models.service import Service
 from app.models.staff_availability import StaffAvailability
 from app.models.time_block import TimeBlock
+from app.models.payment_configuration import PaymentConfiguration, PaymentProvider
+from app.models.payment_device import PaymentDevice
+from app.models.order import Order
+from app.models.payment import Payment
 
 __all__ = [
     "Business",
@@ -38,4 +42,9 @@ __all__ = [
     "Service",
     "StaffAvailability",
     "TimeBlock",
+    "PaymentConfiguration",
+    "PaymentProvider",
+    "PaymentDevice",
+    "Order",
+    "Payment",
 ]

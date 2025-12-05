@@ -149,6 +149,7 @@ class DailyAppointmentItem(BaseModel):
     owner: str | None = None  # Customer account_name
     service_id: int | None = None  # Primary service ID (first in list)
     service: str | None = None  # Primary service name (first in list)
+    service_price: float | None = None  # Primary service price
     tags: list[str] = []  # Pet behavioral tags (empty for now)
     status: str | None = None
     is_confirmed: bool | None = None

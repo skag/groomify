@@ -51,6 +51,12 @@ class Business(Base):
     services: Mapped[list["Service"]] = relationship(
         back_populates="business", cascade="all, delete-orphan"
     )
+    payment_configurations: Mapped[list["PaymentConfiguration"]] = relationship(
+        back_populates="business", cascade="all, delete-orphan"
+    )
+    payment_devices: Mapped[list["PaymentDevice"]] = relationship(
+        back_populates="business", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<Business(id={self.id}, name='{self.name}')>"

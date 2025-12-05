@@ -113,6 +113,20 @@ class Settings:
         "OAUTH_ENCRYPTION_KEY"
     )  # Fernet key for encrypting OAuth tokens
 
+    # Payment Processing Configuration - Square
+    SQUARE_APP_ID: str | None = os.getenv("SQUARE_APP_ID")
+    SQUARE_APP_SECRET: str | None = os.getenv("SQUARE_APP_SECRET")
+    SQUARE_REDIRECT_URI: str = os.getenv(
+        "SQUARE_REDIRECT_URI", "http://localhost:8000/api/payments/oauth/callback"
+    )
+    SQUARE_ENVIRONMENT: str = os.getenv("SQUARE_ENVIRONMENT", "sandbox")  # "sandbox" or "production"
+
+    # Payment Encryption Key (uses OAUTH_ENCRYPTION_KEY if not specified)
+    PAYMENT_ENCRYPTION_KEY: str | None = os.getenv("PAYMENT_ENCRYPTION_KEY")
+
+    # Frontend URL for OAuth redirects
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
     # Database Configuration Properties
     @property
     def database_url(self) -> str:

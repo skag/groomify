@@ -205,9 +205,11 @@ def get_daily_appointments(
         # Get primary service (first service, or None if empty)
         service_name = "No Service"
         service_id = None
+        service_price = None
         if appt.services and len(appt.services) > 0:
             service_name = appt.services[0].name
             service_id = appt.services[0].id
+            service_price = float(appt.services[0].price) if appt.services[0].price else None
 
         # Build the daily appointment item
         item = DailyAppointmentItem(
@@ -226,6 +228,7 @@ def get_daily_appointments(
             owner=appt.customer.account_name if appt.customer else "Unknown",
             service_id=service_id,
             service=service_name,
+            service_price=service_price,
             tags=[],  # Tags not implemented yet - placeholder
             status=appt.status.name if appt.status else None,
             is_confirmed=appt.is_confirmed,

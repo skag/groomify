@@ -134,22 +134,30 @@ class CustomerAppointmentHistory(BaseModel):
 
 
 class DailyAppointmentItem(BaseModel):
-    """Single appointment for the daily calendar view"""
+    """Single item for the daily calendar view (appointment or time block)"""
 
     id: int
     time: str  # Formatted as "9:00 AM"
     end_time: str  # Formatted as "10:30 AM"
-    pet_id: int
-    pet_name: str
-    owner: str  # Customer account_name
-    service_id: int | None = None  # Primary service ID (first in list)
-    service: str  # Primary service name (first in list)
     groomer: str  # Staff member full name
     groomer_id: int
+    is_block: bool = False  # Discriminator: False for appointments, True for blocks
+
+    # Appointment-specific fields (optional when is_block=True)
+    pet_id: int | None = None
+    pet_name: str | None = None
+    owner: str | None = None  # Customer account_name
+    service_id: int | None = None  # Primary service ID (first in list)
+    service: str | None = None  # Primary service name (first in list)
     tags: list[str] = []  # Pet behavioral tags (empty for now)
     status: str | None = None
-    is_confirmed: bool = False
+    is_confirmed: bool | None = None
     notes: str | None = None
+
+    # Block-specific fields (optional when is_block=False)
+    block_reason: str | None = None
+    block_reason_label: str | None = None
+    block_description: str | None = None
 
 
 class GroomerWithAppointments(BaseModel):
@@ -165,6 +173,7 @@ class DailyAppointmentsResponse(BaseModel):
 
     date: date
     total_appointments: int
+    total_blocks: int = 0
     groomers: list[GroomerWithAppointments]
 
 

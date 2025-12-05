@@ -11,17 +11,25 @@ export interface DailyAppointmentItem {
   id: number;
   time: string;
   end_time: string;
-  pet_id: number;
-  pet_name: string;
-  owner: string;
-  service_id: number | null;
-  service: string;
   groomer: string;
   groomer_id: number;
-  tags: string[];
-  status: AppointmentStatus | null;
-  is_confirmed: boolean;
-  notes: string | null;
+  is_block: boolean;
+
+  // Appointment-specific fields (optional when is_block=true)
+  pet_id?: number | null;
+  pet_name?: string | null;
+  owner?: string | null;
+  service_id?: number | null;
+  service?: string | null;
+  tags?: string[];
+  status?: AppointmentStatus | null;
+  is_confirmed?: boolean | null;
+  notes?: string | null;
+
+  // Block-specific fields (optional when is_block=false)
+  block_reason?: string | null;
+  block_reason_label?: string | null;
+  block_description?: string | null;
 }
 
 export interface GroomerWithAppointments {
@@ -33,6 +41,7 @@ export interface GroomerWithAppointments {
 export interface DailyAppointmentsResponse {
   date: string;
   total_appointments: number;
+  total_blocks: number;
   groomers: GroomerWithAppointments[];
 }
 

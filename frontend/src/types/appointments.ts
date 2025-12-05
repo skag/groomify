@@ -7,22 +7,32 @@ import type { AppointmentStatus } from '@/components/AppointmentCard'
 // View mode for the calendar display
 export type ViewMode = 'day' | 'week'
 
-// Appointment data structure used in the calendar
+// Appointment data structure used in the calendar (also used for time blocks)
 export interface Appointment {
   id: number
   time: string
   endTime: string
-  petId?: number
-  petName: string
-  owner: string
-  serviceId?: number
-  service: string
   groomer: string
   groomerId: number
   date: string // ISO date string (YYYY-MM-DD)
+
+  // Block indicator
+  isBlock?: boolean
+
+  // Appointment-specific fields (optional when isBlock=true)
+  petId?: number
+  petName?: string
+  owner?: string
+  serviceId?: number
+  service?: string
   tags?: string[]
   status?: AppointmentStatus
   isConfirmed?: boolean
+
+  // Block-specific fields (optional when isBlock=false)
+  blockReason?: string
+  blockReasonLabel?: string
+  blockDescription?: string
 }
 
 // Calendar date information

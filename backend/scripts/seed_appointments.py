@@ -16,7 +16,7 @@ Usage:
 import os
 import random
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, time
 from pathlib import Path
 
 import click
@@ -48,6 +48,7 @@ from app.models.business_user import BusinessUser, BusinessUserRole
 from app.models.customer import Customer
 from app.models.pet import Pet
 from app.models.service import Service
+from app.models.staff_availability import StaffAvailability
 
 # Sample appointment notes
 APPOINTMENT_NOTES = [
@@ -70,6 +71,103 @@ APPOINTMENT_NOTES = [
     None,
     None,
 ]
+
+DEFAULT_DAY_START = time(9, 0)
+DEFAULT_DAY_END = time(17, 0)
+DAY_NAMES = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+]
+
+
+def load_groomer_availability(
+    db, groomers: list[BusinessUser]
+) -> dict[int, dict[int, StaffAvailability]]:
+    """Return availability entries keyed by groomer id then day of week."""
+    availability_map: dict[int, dict[int, StaffAvailability]] = {
+        groomer.id: {} for groomer in groomers
+    }
+    groomer_ids = [g.id for g in groomers]
+    if not groomer_ids:
+        return availability_map
+
+    entries = (
+        db.query(StaffAvailability)
+        .filter(StaffAvailability.business_user_id.in_(groomer_ids))
+        .all()
+    )
+    for entry in entries:
+        availability_map.setdefault(entry.business_user_id, {})[
+            entry.day_of_week
+        ] = entry
+    return availability_map
+
+
+def get_available_weekdays(
+    groomer_availability: dict[int, dict[int, StaffAvailability]]
+) -> set[int]:
+    """Return the set of weekdays that have at least one available groomer."""
+    weekdays: set[int] = set()
+    for daily in groomer_availability.values():
+        for day, availability in daily.items():
+            if availability.is_available:
+                weekdays.add(day)
+    return weekdays
+
+
+def get_daily_availability_window(
+    target_date: datetime, availability_entry: StaffAvailability | None
+) -> tuple[datetime, datetime] | None:
+    """Return start/end datetimes for the groomer's availability on a given day."""
+    if not availability_entry or not availability_entry.is_available:
+        return None
+
+    start_time_obj = availability_entry.start_time or DEFAULT_DAY_START
+    end_time_obj = availability_entry.end_time or DEFAULT_DAY_END
+    if end_time_obj <= start_time_obj:
+        return None
+
+    start_dt = target_date.replace(
+        hour=start_time_obj.hour,
+        minute=start_time_obj.minute,
+        second=start_time_obj.second,
+        microsecond=0,
+    )
+    end_dt = target_date.replace(
+        hour=end_time_obj.hour,
+        minute=end_time_obj.minute,
+        second=end_time_obj.second,
+        microsecond=0,
+    )
+    return start_dt, end_dt
+
+
+def generate_appointment_time(
+    target_date: datetime,
+    availability_entry: StaffAvailability | None,
+    duration_minutes: int,
+) -> datetime | None:
+    """Generate an appointment start time that fits within a groomer's availability window."""
+    window = get_daily_availability_window(target_date, availability_entry)
+    if not window:
+        return None
+
+    start_dt, end_dt = window
+    window_minutes = int((end_dt - start_dt).total_seconds() // 60)
+    if window_minutes < duration_minutes:
+        return None
+
+    latest_start_offset = window_minutes - duration_minutes
+    available_offsets = list(range(0, latest_start_offset + 1, 15))
+    if not available_offsets:
+        available_offsets = [0]
+    offset_minutes = random.choice(available_offsets)
+    return start_dt + timedelta(minutes=offset_minutes)
 
 
 def get_status_id(db, status_name: str) -> int:
@@ -124,13 +222,6 @@ def get_all_services(db, business_id: int) -> list[Service]:
     return db.query(Service).filter(Service.business_id == business_id, Service.is_active == True).all()
 
 
-def generate_appointment_time(target_date: datetime) -> datetime:
-    """Generate a random time on the given date during business hours (9am-6pm)."""
-    random_hour = random.randint(9, 17)  # 9am to 5pm start times (ends by 6pm with duration)
-    random_minute = random.choice([0, 15, 30, 45])
-    return target_date.replace(hour=random_hour, minute=random_minute, second=0, microsecond=0)
-
-
 def determine_status(appointment_datetime: datetime, now: datetime) -> str:
     """Determine appropriate status based on appointment datetime."""
     if appointment_datetime < now - timedelta(hours=4):
@@ -176,15 +267,19 @@ def create_appointment(
     groomer: BusinessUser,
     appointment_datetime: datetime,
     status_cache: dict[str, int],
+    duration_minutes: int | None = None,
 ) -> Appointment:
     """Create an appointment."""
     now = datetime.now(timezone.utc)
     status_name = determine_status(appointment_datetime, now)
     status_id = status_cache[status_name]
 
-    # Duration is same or more than service duration (add 0-30 mins randomly)
-    extra_time = random.choice([0, 0, 0, 15, 15, 30])  # Weighted towards no extra time
-    duration = service.duration_minutes + extra_time
+    if duration_minutes is None:
+        # Duration is same or more than service duration (add 0-30 mins randomly)
+        extra_time = random.choice([0, 0, 0, 15, 15, 30])  # Weighted towards no extra time
+        duration = service.duration_minutes + extra_time
+    else:
+        duration = duration_minutes
 
     appointment = Appointment(
         business_id=business_id,
@@ -205,20 +300,26 @@ def create_appointment(
     return appointment
 
 
-def generate_working_days(now: datetime, past_weeks: int = 12, future_weeks: int = 8) -> list[datetime]:
+def generate_working_days(
+    now: datetime,
+    past_weeks: int = 12,
+    future_weeks: int = 8,
+    allowed_weekdays: set[int] | None = None,
+) -> list[datetime]:
     """
-    Generate list of working days (Monday-Saturday) for the date range.
+    Generate list of working days for the date range filtered by allowed weekdays.
     Returns dates in chronological order.
     """
     start_date = now - timedelta(weeks=past_weeks)
     end_date = now + timedelta(weeks=future_weeks)
+    if allowed_weekdays is None:
+        allowed_weekdays = {0, 1, 2, 3, 4, 5}  # Default to Monday-Saturday
 
     days = []
     current = start_date.replace(hour=12, minute=0, second=0, microsecond=0)
 
     while current <= end_date:
-        # Monday=0 through Saturday=5 are working days (skip Sunday=6)
-        if current.weekday() < 6:
+        if current.weekday() in allowed_weekdays:
             days.append(current)
         current += timedelta(days=1)
 
@@ -232,21 +333,36 @@ def generate_appointments_for_day(
     pets_with_customers: list[tuple[Pet, Customer]],
     services: list[Service],
     groomers: list[BusinessUser],
+    groomer_availability: dict[int, dict[int, StaffAvailability]],
     status_cache: dict[str, int],
     now: datetime,
     used_pets: set[int],
     pet_default_groomers: dict[int, BusinessUser],
 ) -> tuple[list[Appointment], set[int]]:
     """
-    Generate 4-6 appointments per groomer for a specific day.
+    Generate up to 4-6 appointments per available groomer for a specific day.
     ~80% of appointments will use the pet's default groomer.
     Returns the list of appointments created and updated used_pets set.
     """
     appointments = []
 
+    weekday = target_date.weekday()
+
     for groomer in groomers:
+        availability_entry = groomer_availability.get(groomer.id, {}).get(weekday)
+        window = get_daily_availability_window(target_date, availability_entry)
+        if not window:
+            continue
+
+        window_minutes = int((window[1] - window[0]).total_seconds() // 60)
+        capacity = max(0, window_minutes // 60)
+        if capacity == 0:
+            continue
+
         # Each groomer gets 4-6 appointments per day
-        num_appointments = random.randint(4, 6)
+        num_appointments = min(random.randint(4, 6), capacity)
+        if num_appointments == 0:
+            continue
 
         # Get available pets (not yet used today) that have this groomer as default
         # This ensures we prioritize pets whose default groomer matches
@@ -286,9 +402,12 @@ def generate_appointments_for_day(
             selected_pets.extend(random.sample(other_pets, min(remaining_needed, len(other_pets))))
 
         for pet, customer in selected_pets:
-            used_pets.add(pet.id)
             service = random.choice(services)
-            appointment_datetime = generate_appointment_time(target_date)
+            extra_time = random.choice([0, 0, 0, 15, 15, 30])
+            duration_minutes = service.duration_minutes + extra_time
+            appointment_datetime = generate_appointment_time(target_date, availability_entry, duration_minutes)
+            if not appointment_datetime:
+                continue
 
             appointment = create_appointment(
                 db,
@@ -299,8 +418,10 @@ def generate_appointments_for_day(
                 groomer,
                 appointment_datetime,
                 status_cache,
+                duration_minutes=duration_minutes,
             )
             appointments.append(appointment)
+            used_pets.add(pet.id)
 
     return appointments, used_pets
 
@@ -319,6 +440,7 @@ def create_overlapping_appointment(
     services: list[Service],
     status_cache: dict[str, int],
     overlap_minutes: int,
+    groomer_availability: dict[int, dict[int, StaffAvailability]],
 ) -> Appointment | None:
     """
     Create an appointment that overlaps with the base appointment by the specified minutes.
@@ -343,17 +465,22 @@ def create_overlapping_appointment(
     )
     overlap_start = base_end_time - timedelta(minutes=overlap_minutes)
 
-    # Ensure the overlapping appointment stays within business hours (9am-6pm)
     # Duration is same or more than service duration
     extra_time = random.choice([0, 0, 0, 15, 15, 30])
     duration = service.duration_minutes + extra_time
 
     overlap_end = overlap_start + timedelta(minutes=duration)
 
-    # Check if start time is before 9am or end time is after 6pm
-    if overlap_start.hour < 9:
+    availability_entry = groomer_availability.get(base_appointment.staff_id, {}).get(
+        base_appointment.appointment_datetime.weekday()
+    )
+    window = get_daily_availability_window(base_appointment.appointment_datetime, availability_entry)
+    if not window:
         return None
-    if overlap_end.hour > 18 or (overlap_end.hour == 18 and overlap_end.minute > 0):
+    window_start, window_end = window
+    if overlap_start < window_start:
+        return None
+    if overlap_end > window_end:
         return None
 
     now = datetime.now(timezone.utc)
@@ -466,6 +593,23 @@ def seed_appointments(business_id: int | None, clear_existing: bool, include_tod
             count = groomer_pet_counts.get(groomer.id, 0)
             click.echo(f"  {groomer.first_name} {groomer.last_name}: {count} pets assigned")
 
+        click.echo("\nLoading groomer availability...")
+        groomer_availability = load_groomer_availability(db, groomers)
+        available_weekdays = get_available_weekdays(groomer_availability)
+        if not available_weekdays:
+            click.echo("Error: No staff availability configured for any groomers. Populate staff_availability first.")
+            sys.exit(1)
+
+        readable_days = ", ".join(DAY_NAMES[day] for day in sorted(available_weekdays))
+        click.echo(f"  Appointments will be scheduled on: {readable_days}")
+
+        groomers_without_availability = [
+            groomer for groomer in groomers if not groomer_availability.get(groomer.id)
+        ]
+        if groomers_without_availability:
+            names = ", ".join(f"{g.first_name} {g.last_name}" for g in groomers_without_availability)
+            click.echo(f"  Warning: No availability found for: {names}. They will be skipped.")
+
         # Cache status IDs
         status_cache = {}
         for status_name in ALL_STATUSES:
@@ -488,11 +632,16 @@ def seed_appointments(business_id: int | None, clear_existing: bool, include_tod
             now = datetime.now(local_tz)
             click.echo(f"  Using current local time: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
-        # Generate working days (12 weeks past, 8 weeks future)
-        working_days = generate_working_days(now, past_weeks=12, future_weeks=8)
+        # Generate working days (12 weeks past, 8 weeks future) limited by availability
+        working_days = generate_working_days(
+            now, past_weeks=12, future_weeks=8, allowed_weekdays=available_weekdays
+        )
+        if not working_days:
+            click.echo("Error: No calendar days fall within the configured availability window.")
+            sys.exit(1)
         click.echo(f"\nGenerating appointments for {len(working_days)} working days...")
         click.echo(f"  Date range: {working_days[0].strftime('%Y-%m-%d')} to {working_days[-1].strftime('%Y-%m-%d')}")
-        click.echo(f"  Each groomer will have 4-6 appointments per day")
+        click.echo("  Each available groomer will have up to 4-6 appointments per day, capped by their availability window")
 
         total_appointments = 0
         past_appointments = 0
@@ -517,6 +666,7 @@ def seed_appointments(business_id: int | None, clear_existing: bool, include_tod
                 pets_with_customers,
                 services,
                 groomers,
+                groomer_availability,
                 status_cache,
                 now,
                 used_pets,
@@ -579,6 +729,7 @@ def seed_appointments(business_id: int | None, clear_existing: bool, include_tod
                         services,
                         status_cache,
                         overlap_minutes,
+                        groomer_availability,
                     )
 
                     if overlap_appt:
@@ -599,7 +750,7 @@ def seed_appointments(business_id: int | None, clear_existing: bool, include_tod
         click.echo(f"  Future appointments: {future_appointments}")
         if total_appointments > 0:
             click.echo(f"  Overlapping appointments: {overlapping_appointments} ({overlapping_appointments/total_appointments*100:.1f}%)")
-        click.echo(f"\n  Appointments per day: ~{total_appointments // len(working_days)} ({len(groomers)} groomers x 4-6 each)")
+        click.echo(f"\n  Appointments per day: ~{total_appointments // len(working_days)} ({len(groomers)} groomers, availability-capped 4-6 each)")
         click.echo("\nAppointments by status:")
         for status, count in status_counts.items():
             if count > 0:

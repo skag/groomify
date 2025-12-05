@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.logger import get_logger, setup_logging
-from app.api import auth, business_users, agreements, animal_types, service_categories, services, customers, pets, appointments
+from app.api import auth, business_users, agreements, animal_types, service_categories, services, customers, pets, appointments, time_blocks
 
 
 
@@ -235,7 +235,8 @@ def create_app() -> FastAPI:
     app.include_router(customers.router, prefix="/api")
     app.include_router(pets.router, prefix="/api")
     app.include_router(appointments.router, prefix="/api")
-    logger.info("Registered routers: auth, business_users, agreements, animal_types, service_categories, services, customers, pets, appointments")
+    app.include_router(time_blocks.router, prefix="/api")
+    logger.info("Registered routers: auth, business_users, agreements, animal_types, service_categories, services, customers, pets, appointments, time_blocks")
 
     @app.get("/health")
     async def health_check():

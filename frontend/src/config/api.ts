@@ -67,5 +67,11 @@ export const API_CONFIG = {
       daily: (date: string) => `/api/appointments/daily?date=${date}`,
       statuses: '/api/appointments/statuses',
     },
+    timeBlocks: {
+      create: '/api/time-blocks',
+      get: (id: number) => `/api/time-blocks/${id}`,
+      update: (id: number) => `/api/time-blocks/${id}`,
+      delete: (id: number) => `/api/time-blocks/${id}`,
+    },
   },
 } as const;

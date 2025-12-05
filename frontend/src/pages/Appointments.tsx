@@ -15,8 +15,11 @@ import { Calendar as CalendarPicker } from "@/components/ui/calendar"
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, Calendar, CalendarDays, Search, Dog, X } from "lucide-react"
 import { AppointmentsCalendar } from "@/components/AppointmentsCalendar"
 import { appointmentService, type DailyAppointmentsResponse, type CreateAppointmentRequest, type UpdateAppointmentRequest } from "@/services/appointmentService"
+import { timeBlockService, type CreateTimeBlockRequest } from "@/services/timeBlockService"
 import { petService, type PetSearchResult } from "@/services/petService"
 import { serviceService } from "@/services/serviceService"
+import { staffService } from "@/services/staffService"
+import type { StaffAvailability } from "@/types/staff"
 import type { Service } from "@/types/service"
 import type {
   ViewMode,
@@ -53,6 +56,7 @@ export default function Appointments() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [services, setServices] = useState<CalendarService[]>([])
+  const [staffAvailability, setStaffAvailability] = useState<Map<number, StaffAvailability[]>>(new Map())
 
   // Pet selection state
   const [selectedPet, setSelectedPet] = useState<SelectedPet | null>(null)
@@ -322,23 +326,41 @@ export default function Appointments() {
               groomerMap.set(groomer.id, { id: groomer.id, name: groomer.name })
             }
 
-            for (const appt of groomer.appointments) {
-              transformedAppointments.push({
-                id: appt.id,
-                time: appt.time,
-                endTime: appt.end_time,
-                petId: appt.pet_id,
-                petName: appt.pet_name,
-                owner: appt.owner,
-                serviceId: appt.service_id ?? undefined,
-                service: appt.service,
-                groomer: appt.groomer,
-                groomerId: appt.groomer_id,
-                date: dateStr,
-                tags: appt.tags,
-                status: appt.status ?? undefined,
-                isConfirmed: appt.is_confirmed,
-              })
+            for (const item of groomer.appointments) {
+              // Handle both appointments and time blocks
+              if (item.is_block) {
+                // Time block
+                transformedAppointments.push({
+                  id: item.id,
+                  time: item.time,
+                  endTime: item.end_time,
+                  groomer: item.groomer,
+                  groomerId: item.groomer_id,
+                  date: dateStr,
+                  isBlock: true,
+                  blockReason: item.block_reason ?? undefined,
+                  blockReasonLabel: item.block_reason_label ?? undefined,
+                  blockDescription: item.block_description ?? undefined,
+                })
+              } else {
+                // Regular appointment
+                transformedAppointments.push({
+                  id: item.id,
+                  time: item.time,
+                  endTime: item.end_time,
+                  petId: item.pet_id ?? undefined,
+                  petName: item.pet_name ?? '',
+                  owner: item.owner ?? '',
+                  serviceId: item.service_id ?? undefined,
+                  service: item.service ?? '',
+                  groomer: item.groomer,
+                  groomerId: item.groomer_id,
+                  date: dateStr,
+                  tags: item.tags ?? [],
+                  status: item.status ?? undefined,
+                  isConfirmed: item.is_confirmed ?? false,
+                })
+              }
             }
           }
         })
@@ -374,6 +396,40 @@ export default function Appointments() {
     }
     fetchServices()
   }, [])
+
+  // Fetch staff availability when groomers change
+  useEffect(() => {
+    if (groomers.length === 0) return
+
+    const fetchAllAvailability = async () => {
+      try {
+        const availabilityMap = new Map<number, StaffAvailability[]>()
+
+        // Fetch availability for all groomers in parallel
+        const results = await Promise.all(
+          groomers.map(async (groomer) => {
+            try {
+              const availability = await staffService.getAvailability(groomer.id)
+              return { groomerId: groomer.id, availability }
+            } catch (err) {
+              console.error(`Failed to fetch availability for groomer ${groomer.id}:`, err)
+              return { groomerId: groomer.id, availability: [] }
+            }
+          })
+        )
+
+        results.forEach(({ groomerId, availability }) => {
+          availabilityMap.set(groomerId, availability)
+        })
+
+        setStaffAvailability(availabilityMap)
+      } catch (err) {
+        console.error('Failed to fetch staff availability:', err)
+      }
+    }
+
+    fetchAllAvailability()
+  }, [groomers])
 
   // Generate calendar dates based on view mode
   const calendarDates: CalendarDate[] = (() => {
@@ -683,6 +739,61 @@ export default function Appointments() {
     } catch (err) {
       console.error('Failed to update appointment:', err)
       alert('Failed to update appointment. Please try again.')
+    }
+  }
+
+  // Time block creation handler
+  const handleTimeBlockCreate = async (block: {
+    groomerId: number
+    groomerName: string
+    date: Date
+    startTime: string
+    endTime: string
+    reason: string
+    description?: string
+  }) => {
+    try {
+      // Build the block datetime
+      const { hours, minutes } = parseTimeString(block.startTime)
+      const blockDatetime = new Date(block.date)
+      blockDatetime.setHours(hours, minutes, 0, 0)
+
+      // Calculate duration from start and end times
+      const durationMinutes = calculateDurationMinutes(block.startTime, block.endTime)
+
+      const request: CreateTimeBlockRequest = {
+        staff_id: block.groomerId,
+        block_datetime: blockDatetime.toISOString(),
+        duration_minutes: durationMinutes,
+        reason: block.reason as CreateTimeBlockRequest['reason'],
+        description: block.description,
+      }
+
+      const response = await timeBlockService.createTimeBlock(request)
+
+      // Show conflict warning if applicable
+      if (response.has_conflict && response.conflict_message) {
+        alert(`Time block created with warning: ${response.conflict_message}`)
+      }
+
+      // Add the new block to local state
+      const newBlock: Appointment = {
+        id: response.id,
+        time: block.startTime,
+        endTime: block.endTime,
+        groomer: response.staff_name,
+        groomerId: response.staff_id,
+        date: formatDateToISO(block.date),
+        isBlock: true,
+        blockReason: response.reason,
+        blockReasonLabel: response.reason_label,
+        blockDescription: response.description ?? undefined,
+      }
+
+      setAppointments(prev => [...prev, newBlock])
+    } catch (err) {
+      console.error('Failed to create time block:', err)
+      alert('Failed to create time block. Please try again.')
     }
   }
 
@@ -997,6 +1108,7 @@ export default function Appointments() {
                 } : undefined}
                 onPetSearch={handlePetSearch}
                 services={services}
+                staffAvailability={staffAvailability}
                 rescheduleMode={rescheduleMode.active ? {
                   active: true,
                   appointmentId: rescheduleMode.appointmentId,
@@ -1004,6 +1116,7 @@ export default function Appointments() {
                 } : undefined}
                 onBookingConfirm={handleBookingConfirm}
                 onAppointmentUpdate={handleAppointmentUpdate}
+                onTimeBlockCreate={handleTimeBlockCreate}
               />
             )}
           </div>

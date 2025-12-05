@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback, useEffect } from "react"
+import React, { useRef, useState, useCallback, useEffect, useMemo } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -6,7 +6,7 @@ import { Popover, PopoverContent, PopoverAnchor } from "@/components/ui/popover"
 import { AppointmentCard } from "@/components/AppointmentCard"
 import { cn } from "@/lib/utils"
 import { Textarea } from "@/components/ui/textarea"
-import { Calendar, X, Search, Dog, Loader2, Scissors, Ban, ChevronDown } from "lucide-react"
+import { Calendar, X, Search, Dog, Loader2, Scissors, Ban, ChevronDown, AlertTriangle } from "lucide-react"
 import type {
   Appointment,
   CalendarDate,
@@ -16,6 +16,7 @@ import type {
   SlotSelection,
   RescheduleModeInfo,
 } from "@/types/appointments"
+import type { StaffAvailability } from "@/types/staff"
 import { BLOCK_REASONS, DEFAULT_START_HOUR } from "@/constants/appointments"
 import {
   parseTimeToMinutes,
@@ -46,6 +47,8 @@ interface AppointmentsCalendarProps {
   onPetSearch?: (query: string) => Promise<CalendarPet[]>
   // Services list for selection
   services?: CalendarService[]
+  // Staff availability for showing unavailable times
+  staffAvailability?: Map<number, StaffAvailability[]>
   // Reschedule mode info
   rescheduleMode?: RescheduleModeInfo
   // Callback when booking is confirmed
@@ -72,6 +75,16 @@ interface AppointmentsCalendarProps {
     startTime: string
     endTime: string
   }) => void
+  // Callback when time block is created
+  onTimeBlockCreate?: (block: {
+    groomerId: number
+    groomerName: string
+    date: Date
+    startTime: string
+    endTime: string
+    reason: string
+    description?: string
+  }) => void
 }
 
 export function AppointmentsCalendar({
@@ -83,9 +96,11 @@ export function AppointmentsCalendar({
   preSelectedPet,
   onPetSearch,
   services = [],
+  staffAvailability,
   rescheduleMode,
   onBookingConfirm,
-  onAppointmentUpdate
+  onAppointmentUpdate,
+  onTimeBlockCreate
 }: AppointmentsCalendarProps) {
   const [activeAppointmentId, setActiveAppointmentId] = useState<number | null>(null)
   const [selection, setSelection] = useState<SlotSelection | null>(null)
@@ -463,7 +478,28 @@ export function AppointmentsCalendar({
 
   // Handle booking confirmation (create or update)
   const handleConfirmBooking = () => {
-    if (!selection || !selectedPet || !selectedService) return
+    if (!selection) return
+
+    // Handle block mode
+    if (bookingMode === 'block') {
+      if (!blockReason || !onTimeBlockCreate) return
+
+      onTimeBlockCreate({
+        groomerId: selection.groomerId,
+        groomerName: selection.groomerName,
+        date: selection.date,
+        startTime: startTimeInput,
+        endTime: endTimeInput,
+        reason: blockReason,
+        description: blockDescription || undefined
+      })
+
+      handleClosePopover()
+      return
+    }
+
+    // Handle appointment mode
+    if (!selectedPet || !selectedService) return
 
     const bookingData = {
       petId: selectedPet.id,
@@ -513,6 +549,99 @@ export function AppointmentsCalendar({
 
     return { topOffset, height }
   }
+
+  // Calculate unavailable time regions for a groomer on a specific date
+  // Returns array of { topOffset, height } for regions outside working hours
+  const getUnavailableRegions = (groomerId: number, date: Date) => {
+    if (!staffAvailability) return []
+
+    const groomerAvailability = staffAvailability.get(groomerId)
+    if (!groomerAvailability || groomerAvailability.length === 0) return []
+
+    // Get day of week (0=Monday, 6=Sunday) - JavaScript getDay() returns 0=Sunday
+    const jsDay = date.getDay()
+    const dayOfWeek = jsDay === 0 ? 6 : jsDay - 1 // Convert to 0=Monday format
+
+    const dayAvailability = groomerAvailability.find(a => a.day_of_week === dayOfWeek)
+
+    // If no availability record or not available, the entire day is unavailable
+    if (!dayAvailability || !dayAvailability.is_available) {
+      const totalHeight = timeSlots.length * 100 // Each slot is 100px
+      return [{ topOffset: 0, height: totalHeight }]
+    }
+
+    const regions: { topOffset: number; height: number }[] = []
+    const startHourMinutes = startHour * 60
+    const calendarEndMinutes = startHourMinutes + timeSlots.length * 60
+
+    // Parse availability times (HH:MM:SS format)
+    const parseTime = (timeStr: string | undefined): number | null => {
+      if (!timeStr) return null
+      const [hours, minutes] = timeStr.split(':').map(Number)
+      return hours * 60 + minutes
+    }
+
+    const availStart = parseTime(dayAvailability.start_time)
+    const availEnd = parseTime(dayAvailability.end_time)
+
+    // Region before work hours starts
+    if (availStart !== null && availStart > startHourMinutes) {
+      const height = ((availStart - startHourMinutes) / 60) * 100
+      regions.push({ topOffset: 0, height })
+    }
+
+    // Region after work hours ends
+    if (availEnd !== null && availEnd < calendarEndMinutes) {
+      const topOffset = ((availEnd - startHourMinutes) / 60) * 100
+      const height = ((calendarEndMinutes - availEnd) / 60) * 100
+      regions.push({ topOffset, height })
+    }
+
+    return regions
+  }
+
+  // Check if a specific time is outside groomer's working hours
+  const isTimeOutsideAvailability = (groomerId: number, date: Date, timeMinutes: number): boolean => {
+    if (!staffAvailability) return false
+
+    const groomerAvailability = staffAvailability.get(groomerId)
+    if (!groomerAvailability || groomerAvailability.length === 0) return false
+
+    const jsDay = date.getDay()
+    const dayOfWeek = jsDay === 0 ? 6 : jsDay - 1
+
+    const dayAvailability = groomerAvailability.find(a => a.day_of_week === dayOfWeek)
+
+    // No availability record or not available = outside working hours
+    if (!dayAvailability || !dayAvailability.is_available) return true
+
+    // Parse times and check if outside window
+    const parseTime = (timeStr: string | undefined): number | null => {
+      if (!timeStr) return null
+      const [hours, minutes] = timeStr.split(':').map(Number)
+      return hours * 60 + minutes
+    }
+
+    const availStart = parseTime(dayAvailability.start_time)
+    const availEnd = parseTime(dayAvailability.end_time)
+
+    if (availStart !== null && timeMinutes < availStart) return true
+    if (availEnd !== null && timeMinutes >= availEnd) return true
+
+    return false
+  }
+
+  // Compute warning message when selected time is outside groomer's working hours
+  const availabilityWarning = useMemo(() => {
+    if (!selection || bookingMode !== 'appointment') return null
+
+    const startMinutes = parseTimeToMinutes(startTimeInput)
+    if (isTimeOutsideAvailability(selection.groomerId, selection.date, startMinutes)) {
+      return "This time is outside the groomer's normal working hours"
+    }
+    return null
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection, startTimeInput, bookingMode, staffAvailability])
 
   return (
     <div className="border rounded-lg h-full flex flex-col overflow-hidden relative">
@@ -809,6 +938,14 @@ export function AppointmentsCalendar({
                   </>
                 )}
 
+                {/* Availability Warning */}
+                {availabilityWarning && (
+                  <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-md text-amber-800 text-sm">
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                    <span>{availabilityWarning}</span>
+                  </div>
+                )}
+
                 {/* Action Buttons */}
                 <div className="flex gap-2 pt-2">
                   <Button variant="outline" size="sm" className="flex-1" onClick={handleClosePopover}>
@@ -922,6 +1059,7 @@ export function AppointmentsCalendar({
             {dates.map((calDate) =>
               groomers.map((groomer) => {
                 const selectionOverlay = getSelectionOverlayForColumn(groomer.id, calDate.dateStr)
+                const unavailableRegions = getUnavailableRegions(groomer.id, calDate.date)
 
                 return (
                   <div
@@ -929,6 +1067,20 @@ export function AppointmentsCalendar({
                     className="relative border-r last:border-r-0 flex-1"
                     style={{ minWidth: minColumnWidth }}
                   >
+                    {/* Unavailable time overlays with diagonal stripes */}
+                    {unavailableRegions.map((region, idx) => (
+                      <div
+                        key={`unavail-${idx}`}
+                        className="absolute left-0 right-0 pointer-events-none z-5"
+                        style={{
+                          top: `${region.topOffset}px`,
+                          height: `${region.height}px`,
+                          background: 'repeating-linear-gradient(135deg, transparent, transparent 8px, rgba(156, 163, 175, 0.3) 8px, rgba(156, 163, 175, 0.3) 10px)',
+                          backgroundColor: 'rgba(243, 244, 246, 0.7)',
+                        }}
+                      />
+                    ))}
+
                     {/* Single selection overlay for the entire column */}
                     {selectionOverlay && (
                       <div
@@ -1014,12 +1166,40 @@ export function AppointmentsCalendar({
                               const stackOffset = isOverlapping && overlapIndex > 0 ? 12 : 0
                               const leftPosition = isActive ? baseLeftPadding : baseLeftPadding + stackOffset
 
+                              // Render time block or appointment
+                              if (appointment.isBlock) {
+                                return (
+                                  <div
+                                    key={`block-${appointment.id}`}
+                                    className="absolute bg-gray-200 border-2 border-dashed border-gray-400 rounded-md p-2 overflow-hidden cursor-default"
+                                    style={{
+                                      top: `${topOffset}px`,
+                                      left: `${leftPosition}px`,
+                                      right: '4px',
+                                      height: `${heightPx + borderAdjustment}px`,
+                                      zIndex: zIndex
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <div className="flex items-center gap-1">
+                                      <Ban className="h-3 w-3 text-gray-500 shrink-0" />
+                                      <span className="text-xs font-medium text-gray-600 truncate">
+                                        {appointment.blockReasonLabel || appointment.blockReason}
+                                      </span>
+                                    </div>
+                                    {appointment.blockDescription && (
+                                      <p className="text-xs text-gray-500 mt-1 truncate">{appointment.blockDescription}</p>
+                                    )}
+                                  </div>
+                                )
+                              }
+
                               return (
                                 <AppointmentCard
                                   key={appointment.id}
-                                  petName={appointment.petName}
-                                  owner={appointment.owner}
-                                  service={appointment.service}
+                                  petName={appointment.petName || ''}
+                                  owner={appointment.owner || ''}
+                                  service={appointment.service || ''}
                                   tags={appointment.tags}
                                   status={appointment.status}
                                   isConfirmed={appointment.isConfirmed}

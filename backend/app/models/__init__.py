@@ -17,6 +17,7 @@ from app.models.animal_breed import AnimalBreed
 from app.models.service_category import ServiceCategory
 from app.models.service import Service
 from app.models.staff_availability import StaffAvailability
+from app.models.time_block import TimeBlock
 
 __all__ = [
     "Business",
@@ -36,4 +37,5 @@ __all__ = [
     "ServiceCategory",
     "Service",
     "StaffAvailability",
+    "TimeBlock",
 ]

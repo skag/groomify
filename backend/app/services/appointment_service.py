@@ -9,6 +9,8 @@ from app.models.business_user import BusinessUser, BusinessUserRole, BusinessUse
 from app.models.customer import Customer
 from app.models.pet import Pet
 from app.models.service import Service
+from app.models.time_block import TimeBlock
+from app.schemas.time_block import BLOCK_REASON_LABELS
 from app.schemas.appointment import (
     CustomerAppointmentHistory,
     AppointmentServiceSchema,
@@ -122,7 +124,7 @@ def get_daily_appointments(
     db: Session, business_id: int, target_date: date
 ) -> DailyAppointmentsResponse:
     """
-    Get all appointments for a specific date, grouped by groomer.
+    Get all appointments and time blocks for a specific date, grouped by groomer.
 
     Includes all active groomers for the business, even those with no appointments.
 
@@ -132,7 +134,7 @@ def get_daily_appointments(
         target_date: The date to fetch appointments for
 
     Returns:
-        DailyAppointmentsResponse with groomers and their appointments
+        DailyAppointmentsResponse with groomers and their appointments/blocks
     """
     # Get all groomers for this business (active only)
     groomer_role = (
@@ -177,11 +179,26 @@ def get_daily_appointments(
         .all()
     )
 
-    # Group appointments by groomer
-    appointments_by_groomer: dict[int, list[DailyAppointmentItem]] = {
+    # Get all time blocks for the date
+    time_blocks = (
+        db.query(TimeBlock)
+        .options(joinedload(TimeBlock.staff_member))
+        .filter(
+            and_(
+                TimeBlock.business_id == business_id,
+                cast(TimeBlock.block_datetime, Date) == target_date,
+            )
+        )
+        .order_by(TimeBlock.block_datetime)
+        .all()
+    )
+
+    # Group items by groomer (appointments + blocks)
+    items_by_groomer: dict[int, list[DailyAppointmentItem]] = {
         groomer.id: [] for groomer in groomers
     }
 
+    # Add appointments
     for appt in appointments:
         end_time = appt.appointment_datetime + timedelta(minutes=appt.duration_minutes)
 
@@ -197,17 +214,18 @@ def get_daily_appointments(
             id=appt.id,
             time=_format_time_12h(appt.appointment_datetime),
             end_time=_format_time_12h(end_time),
-            pet_id=appt.pet_id,
-            pet_name=appt.pet.name if appt.pet else "Unknown",
-            owner=appt.customer.account_name if appt.customer else "Unknown",
-            service_id=service_id,
-            service=service_name,
             groomer=(
                 f"{appt.staff_member.first_name} {appt.staff_member.last_name}"
                 if appt.staff_member
                 else "Unassigned"
             ),
             groomer_id=appt.staff_id,
+            is_block=False,
+            pet_id=appt.pet_id,
+            pet_name=appt.pet.name if appt.pet else "Unknown",
+            owner=appt.customer.account_name if appt.customer else "Unknown",
+            service_id=service_id,
+            service=service_name,
             tags=[],  # Tags not implemented yet - placeholder
             status=appt.status.name if appt.status else None,
             is_confirmed=appt.is_confirmed,
@@ -215,8 +233,8 @@ def get_daily_appointments(
         )
 
         # Add to groomer's list if groomer exists in our dict
-        if appt.staff_id in appointments_by_groomer:
-            appointments_by_groomer[appt.staff_id].append(item)
+        if appt.staff_id in items_by_groomer:
+            items_by_groomer[appt.staff_id].append(item)
         else:
             # Handle case where appointment is assigned to non-groomer staff
             # or groomer who is no longer active
@@ -225,12 +243,44 @@ def get_daily_appointments(
                 "who is not in active groomers list"
             )
 
+    # Add time blocks
+    for block in time_blocks:
+        end_time = block.block_datetime + timedelta(minutes=block.duration_minutes)
+
+        item = DailyAppointmentItem(
+            id=block.id,
+            time=_format_time_12h(block.block_datetime),
+            end_time=_format_time_12h(end_time),
+            groomer=(
+                f"{block.staff_member.first_name} {block.staff_member.last_name}"
+                if block.staff_member
+                else "Unknown"
+            ),
+            groomer_id=block.staff_id,
+            is_block=True,
+            block_reason=block.reason,
+            block_reason_label=BLOCK_REASON_LABELS.get(block.reason, block.reason),
+            block_description=block.description,
+        )
+
+        if block.staff_id in items_by_groomer:
+            items_by_groomer[block.staff_id].append(item)
+        else:
+            logger.warning(
+                f"Time block {block.id} assigned to staff {block.staff_id} "
+                "who is not in active groomers list"
+            )
+
+    # Sort each groomer's items by time
+    for groomer_id in items_by_groomer:
+        items_by_groomer[groomer_id].sort(key=lambda x: x.time)
+
     # Build response
     groomer_responses = [
         GroomerWithAppointments(
             id=groomer.id,
             name=f"{groomer.first_name} {groomer.last_name}",
-            appointments=appointments_by_groomer.get(groomer.id, []),
+            appointments=items_by_groomer.get(groomer.id, []),
         )
         for groomer in groomers
     ]
@@ -238,6 +288,7 @@ def get_daily_appointments(
     return DailyAppointmentsResponse(
         date=target_date,
         total_appointments=len(appointments),
+        total_blocks=len(time_blocks),
         groomers=groomer_responses,
     )
 

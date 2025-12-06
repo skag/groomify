@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import { AppLayout } from "@/components/app-layout"
 import { Separator } from "@/components/ui/separator"
@@ -18,8 +18,13 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { CancelAppointmentModal } from "@/components/CancelAppointmentModal"
 import { appointmentService } from "@/services/appointmentService"
+import { orderService } from "@/services/orderService"
+import { integrationService } from "@/services/integrationService"
 import type { AppointmentStatusResponse, DailyAppointmentItem } from "@/services/appointmentService"
 import type { AppointmentStatus as BackendAppointmentStatus } from "@/components/AppointmentCard"
+import type { Order, PaymentStatusResponse } from "@/types/order"
+import type { PaymentDevice } from "@/types/integration"
+import { toast } from "sonner"
 
 
 // Internal appointment type for Today page
@@ -58,10 +63,22 @@ export default function Today() {
   const [editedStartTime, setEditedStartTime] = useState("")
   const [editedEndTime, setEditedEndTime] = useState("")
   const [showCheckoutModal, setShowCheckoutModal] = useState(false)
-  const [checkoutAmount, setCheckoutAmount] = useState("")
   const [checkoutAppointment, setCheckoutAppointment] = useState<Appointment | null>(null)
   const [showCancelModal, setShowCancelModal] = useState(false)
   const [cancelAppointment, setCancelAppointment] = useState<Appointment | null>(null)
+
+  // Payment processing state
+  const [order, setOrder] = useState<Order | null>(null)
+  const [editedSubtotal, setEditedSubtotal] = useState<string>("")
+  const [showDiscount, setShowDiscount] = useState(false)
+  const [discountType, setDiscountType] = useState<"percentage" | "fixed">("percentage")
+  const [discountValue, setDiscountValue] = useState<string>("")
+  const [paymentDevices, setPaymentDevices] = useState<PaymentDevice[]>([])
+  const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null)
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false)
+  const [paymentId, setPaymentId] = useState<number | null>(null)
+  const [paymentStatus, setPaymentStatus] = useState<PaymentStatusResponse | null>(null)
+  const pollingIntervalRef = useRef<number | null>(null)
 
   // Data state
   const [appointments, setAppointments] = useState<Appointment[]>([])
@@ -117,6 +134,15 @@ export default function Today() {
     fetchData()
   }, [])
 
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+      }
+    }
+  }, [])
+
   // Transform backend appointment to internal format
   const transformAppointment = (apt: DailyAppointmentItem): Appointment => ({
     id: apt.id,
@@ -130,7 +156,7 @@ export default function Today() {
     groomer: apt.groomer,
     groomerId: apt.groomer_id,
     status: apt.status || "scheduled",
-    amount: "$0", // Placeholder until transactions are implemented
+    amount: apt.service_price ? `$${apt.service_price.toFixed(2)}` : "$0.00",
     rabiesVaccination: { exists: false, valid: false }, // Placeholder until pet records are enhanced
     notes: apt.notes || "",
     tags: apt.tags,
@@ -191,9 +217,9 @@ export default function Today() {
     }
   }
 
-  const handleCheckIn = async () => {
+  const handleStartWork = async () => {
     if (!selectedAppointment) return
-    await handleStatusChange(selectedAppointment.id, "checked_in")
+    await handleStatusChange(selectedAppointment.id, "in_progress")
     handleCloseModal()
   }
 
@@ -240,26 +266,196 @@ export default function Today() {
     }
   }
 
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
+    if (!selectedAppointment) return
+
     setCheckoutAppointment(selectedAppointment)
-    if (selectedAppointment?.amount) {
-      setCheckoutAmount(selectedAppointment.amount.replace('$', ''))
-    }
     setSelectedAppointment(null)
     setShowCheckoutModal(true)
+    setIsProcessingPayment(false)
+    setPaymentStatus(null)
+
+    try {
+      // Load payment devices
+      const devices = await integrationService.getDevices()
+      setPaymentDevices(devices)
+
+      // Auto-select first active device
+      const activeDevice = devices.find(d => d.is_active)
+      if (activeDevice) {
+        setSelectedDeviceId(activeDevice.id)
+      }
+
+      // Check if order already exists for this appointment
+      const existingOrder = await orderService.getAppointmentOrder(selectedAppointment.id)
+      if (existingOrder) {
+        setOrder(existingOrder)
+        setEditedSubtotal(Number(existingOrder.subtotal).toFixed(2))
+
+        // Load discount from existing order if present
+        if (existingOrder.discount_type && existingOrder.discount_value) {
+          setShowDiscount(true)
+          // Convert backend "dollar" to frontend "fixed"
+          const frontendDiscountType = existingOrder.discount_type === "dollar" ? "fixed" : "percentage"
+          setDiscountType(frontendDiscountType as "percentage" | "fixed")
+          setDiscountValue(existingOrder.discount_value.toString())
+        }
+      } else {
+        // Create order from appointment
+        const newOrder = await orderService.createFromAppointment({
+          appointment_id: selectedAppointment.id,
+          tax_rate: 0.08, // 8% tax rate - can be made configurable
+        })
+        setOrder(newOrder)
+        setEditedSubtotal(Number(newOrder.subtotal).toFixed(2))
+      }
+    } catch (error) {
+      console.error("Failed to prepare checkout:", error)
+      toast.error("Failed to prepare checkout. Please try again.")
+      setShowCheckoutModal(false)
+      setCheckoutAppointment(null)
+    }
   }
 
-  const handleChargeNow = () => {
-    alert(`Charging $${checkoutAmount} for ${checkoutAppointment?.petName}`)
-    setShowCheckoutModal(false)
-    setCheckoutAppointment(null)
-    setCheckoutAmount("")
+  const handleInitiatePayment = async () => {
+    if (!order || !selectedDeviceId) {
+      toast.error("Please select a payment device")
+      return
+    }
+
+    setIsProcessingPayment(true)
+
+    try {
+      // STEP 1: Update order with discount if it has changed
+      let updatedOrder = order
+
+      // Convert frontend "fixed" to backend "dollar"
+      const backendDiscountType = discountType === "fixed" ? "dollar" : "percentage"
+      const currentDiscountValue = showDiscount && discountValue ? Number(discountValue) : null
+      const currentDiscountType = showDiscount && discountValue ? backendDiscountType : null
+
+      // Check if discount has changed from what's in the order
+      const discountChanged = (
+        order.discount_type !== currentDiscountType ||
+        order.discount_value !== currentDiscountValue
+      )
+
+      if (discountChanged) {
+        console.log("Discount changed, updating order...")
+        updatedOrder = await orderService.updateOrderDiscount(
+          order.id,
+          currentDiscountType,
+          currentDiscountValue
+        )
+        setOrder(updatedOrder)
+        console.log("Updated order with discount:", updatedOrder)
+      } else {
+        console.log("Discount unchanged, skipping update")
+      }
+
+      // STEP 2: Initiate terminal checkout with updated order
+      const paymentResponse = await orderService.createTerminalCheckout({
+        order_id: updatedOrder.id,
+        payment_device_id: selectedDeviceId,
+      })
+
+      setPaymentId(paymentResponse.payment_id)
+
+      // Start polling for payment status
+      const interval = setInterval(() => {
+        pollPaymentStatus(paymentResponse.payment_id)
+      }, 3000) // Poll every 3 seconds
+
+      pollingIntervalRef.current = interval
+    } catch (error) {
+      console.error("Failed to initiate payment:", error)
+      toast.error("Failed to start payment. Please try again.")
+      setIsProcessingPayment(false)
+    }
+  }
+
+  const pollPaymentStatus = async (pId: number) => {
+    try {
+      const status = await orderService.getPaymentStatus(pId)
+      setPaymentStatus(status)
+
+      // Check if payment is completed
+      if (status.status === "completed") {
+        // Stop polling
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current)
+          pollingIntervalRef.current = null
+        }
+
+        // Extract tip amount if present
+        const tipAmount = status.tip_money?.amount
+          ? (status.tip_money.amount / 100).toFixed(2)
+          : "0.00"
+
+        toast.success(
+          `Payment completed! ${tipAmount !== "0.00" ? `Tip: $${tipAmount}` : ""}`
+        )
+
+        // Update appointment status to completed
+        await handleStatusChange(checkoutAppointment!.id, "completed")
+
+        setIsProcessingPayment(false)
+
+        // Auto-close modal after successful payment
+        setTimeout(() => {
+          handleCloseCheckoutModal()
+        }, 1500)
+      } else if (status.status === "failed" || status.status === "cancelled") {
+        // Stop polling
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current)
+          pollingIntervalRef.current = null
+        }
+
+        toast.error(`Payment ${status.status}`)
+        setIsProcessingPayment(false)
+      }
+    } catch (error) {
+      console.error("Failed to poll payment status:", error)
+    }
+  }
+
+  const handleCancelPayment = async () => {
+    if (!paymentId) return
+
+    try {
+      await orderService.cancelPayment(paymentId)
+
+      // Stop polling
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+        pollingIntervalRef.current = null
+      }
+
+      toast.info("Payment cancelled")
+      setIsProcessingPayment(false)
+      setPaymentStatus(null)
+    } catch (error) {
+      console.error("Failed to cancel payment:", error)
+      toast.error("Failed to cancel payment")
+    }
   }
 
   const handleCloseCheckoutModal = () => {
+    // Stop polling if active
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current)
+      pollingIntervalRef.current = null
+    }
+
     setShowCheckoutModal(false)
     setCheckoutAppointment(null)
-    setCheckoutAmount("")
+    setOrder(null)
+    setPaymentDevices([])
+    setSelectedDeviceId(null)
+    setIsProcessingPayment(false)
+    setPaymentId(null)
+    setPaymentStatus(null)
   }
 
   const handleBookAppointment = () => {
@@ -300,14 +496,8 @@ export default function Today() {
     switch (selectedAppointment.status) {
       case "scheduled":
         return (
-          <Button onClick={handleCheckIn} className="w-full sm:w-auto">
-            Check In
-          </Button>
-        )
-      case "checked_in":
-        return (
-          <Button onClick={handleMarkReady} className="w-full sm:w-auto">
-            Ready for pick-up
+          <Button onClick={handleStartWork} className="w-full sm:w-auto">
+            Start Work
           </Button>
         )
       case "in_progress":
@@ -374,14 +564,16 @@ export default function Today() {
           </div>
 
           {/* Kanban Board */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 flex-1">
-            {columns.map((column) => {
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 flex-1">
+            {columns
+              .filter(column => column.status !== "no_show" && column.status !== "cancelled")
+              .map((column) => {
               const columnAppointments = appointments.filter(a => a.status === column.status)
               return (
                 <div key={column.status} className="flex flex-col gap-3">
                   {/* Column Header */}
                   <div className="flex items-center justify-between px-3 py-2 bg-muted rounded-lg">
-                    <h3 className="font-semibold text-sm">{column.displayText}</h3>
+                    <h3 className="font-semibold text-sm whitespace-nowrap">{column.displayText}</h3>
                     <Badge variant="secondary" className="rounded-full">
                       {columnAppointments.length}
                     </Badge>
@@ -570,7 +762,7 @@ export default function Today() {
           </div>
 
           <DialogFooter className="flex-col sm:flex-row gap-2">
-            {selectedAppointment?.status !== "checked_in" && selectedAppointment?.status !== "ready_for_pickup" && selectedAppointment?.status !== "completed" && (
+            {selectedAppointment?.status !== "in_progress" && selectedAppointment?.status !== "ready_for_pickup" && selectedAppointment?.status !== "completed" && (
               <Button
                 variant="destructive"
                 onClick={handleCancel}
@@ -580,7 +772,7 @@ export default function Today() {
                 Cancel
               </Button>
             )}
-            {selectedAppointment?.status !== "checked_in" && selectedAppointment?.status !== "ready_for_pickup" && (
+            {selectedAppointment?.status !== "in_progress" && selectedAppointment?.status !== "ready_for_pickup" && (
               <Button
                 variant="outline"
                 onClick={selectedAppointment?.status === "scheduled" ? handleReschedule : handleBookNext}
@@ -596,11 +788,11 @@ export default function Today() {
 
       {/* Checkout Modal */}
       <Dialog open={showCheckoutModal} onOpenChange={(open) => !open && handleCloseCheckoutModal()}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Checkout</DialogTitle>
             <DialogDescription>
-              Complete payment for {checkoutAppointment?.petName}
+              Process payment for {checkoutAppointment?.petName}
             </DialogDescription>
           </DialogHeader>
 
@@ -627,31 +819,289 @@ export default function Today() {
 
             <Separator />
 
-            {/* Amount Input */}
-            <div className="space-y-2">
-              <Label htmlFor="amount" className="text-sm font-medium">Amount</Label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
-                <input
-                  id="amount"
-                  type="number"
-                  step="0.01"
-                  value={checkoutAmount}
-                  onChange={(e) => setCheckoutAmount(e.target.value)}
-                  className="flex h-10 w-full rounded-md border border-input bg-background pl-7 pr-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  placeholder="0.00"
-                />
+            {/* Order Details - Cart Style */}
+            {order && (
+              <div className="space-y-4">
+                {/* Cart Items */}
+                <div className="space-y-2">
+                  <h3 className="text-sm font-semibold text-muted-foreground">Services</h3>
+                  <div className="space-y-2">
+                    {/* Service Line Item */}
+                    <div className="flex justify-between items-start p-3 bg-muted/30 rounded-md">
+                      <div className="flex-1">
+                        <p className="font-medium">{checkoutAppointment?.service}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {checkoutAppointment?.groomer}
+                        </p>
+                      </div>
+                      {!isProcessingPayment ? (
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={editedSubtotal}
+                          onChange={(e) => setEditedSubtotal(e.target.value)}
+                          className="w-24 text-right"
+                        />
+                      ) : (
+                        <span className="font-medium">${editedSubtotal}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Add Discount Button/Form */}
+                  {!isProcessingPayment && (
+                    <div className="pt-2">
+                      {!showDiscount ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setShowDiscount(true)}
+                        >
+                          + Add Discount
+                        </Button>
+                      ) : (
+                        <div className="flex items-center gap-3 p-3 border rounded-md bg-muted/20">
+                          <span className="text-sm font-medium whitespace-nowrap">Discount:</span>
+
+                          {/* Toggle between % and $ */}
+                          <div className="flex rounded-md border border-input overflow-hidden">
+                            <button
+                              type="button"
+                              onClick={() => setDiscountType("percentage")}
+                              className={`px-3 py-1 text-sm font-medium transition-colors ${
+                                discountType === "percentage"
+                                  ? "bg-primary text-primary-foreground"
+                                  : "bg-background hover:bg-muted"
+                              }`}
+                            >
+                              %
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDiscountType("fixed")}
+                              className={`px-3 py-1 text-sm font-medium transition-colors ${
+                                discountType === "fixed"
+                                  ? "bg-primary text-primary-foreground"
+                                  : "bg-background hover:bg-muted"
+                              }`}
+                            >
+                              $
+                            </button>
+                          </div>
+
+                          {/* Discount Input */}
+                          <Input
+                            id="discount-value"
+                            type="number"
+                            step={discountType === "percentage" ? "1" : "0.01"}
+                            min="0"
+                            max={discountType === "percentage" ? "100" : undefined}
+                            value={discountValue}
+                            onChange={(e) => setDiscountValue(e.target.value)}
+                            placeholder={discountType === "percentage" ? "0" : "0.00"}
+                            className="w-24"
+                          />
+
+                          {/* Remove Button */}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setShowDiscount(false)
+                              setDiscountValue("")
+                            }}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <Separator />
+
+                {/* Summary */}
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Subtotal:</span>
+                    <span className="font-medium">${editedSubtotal}</span>
+                  </div>
+
+                  {/* Discount Line */}
+                  {discountValue && Number(discountValue) > 0 && (
+                    <div className="flex justify-between text-sm text-green-600">
+                      <span>
+                        Discount {discountType === "percentage" ? `(${discountValue}%)` : ""}:
+                      </span>
+                      <span>
+                        -${discountType === "percentage"
+                          ? (Number(editedSubtotal) * Number(discountValue) / 100).toFixed(2)
+                          : Number(discountValue).toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Tax (8%):</span>
+                    <span className="font-medium">
+                      ${(() => {
+                        const subtotal = Number(editedSubtotal)
+                        const discount = discountType === "percentage"
+                          ? subtotal * Number(discountValue || 0) / 100
+                          : Number(discountValue || 0)
+                        const afterDiscount = Math.max(0, subtotal - discount)
+                        return (afterDiscount * 0.08).toFixed(2)
+                      })()}
+                    </span>
+                  </div>
+
+                  {paymentStatus?.tip_money?.amount && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Tip:</span>
+                      <span className="font-medium text-green-600">
+                        ${(paymentStatus.tip_money.amount / 100).toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+
+                  <Separator />
+
+                  <div className="flex justify-between items-center pt-2">
+                    <span className="text-lg font-semibold">Total:</span>
+                    <span className="text-2xl font-bold">
+                      ${paymentStatus?.total_money?.amount
+                        ? (paymentStatus.total_money.amount / 100).toFixed(2)
+                        : (() => {
+                            const subtotal = Number(editedSubtotal)
+                            const discount = discountType === "percentage"
+                              ? subtotal * Number(discountValue || 0) / 100
+                              : Number(discountValue || 0)
+                            const afterDiscount = Math.max(0, subtotal - discount)
+                            return (afterDiscount * 1.08).toFixed(2)
+                          })()}
+                    </span>
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* Device Selection */}
+            {!isProcessingPayment && paymentDevices.length > 0 && (
+              <div className="space-y-2">
+                <Label htmlFor="device" className="text-sm font-medium">Payment Device</Label>
+                <select
+                  id="device"
+                  value={selectedDeviceId || ""}
+                  onChange={(e) => setSelectedDeviceId(Number(e.target.value))}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  <option value="">Select a device...</option>
+                  {paymentDevices.map((device) => (
+                    <option key={device.id} value={device.id}>
+                      {device.device_name} {!device.is_active && "(Inactive)"}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Payment Processing Status */}
+            {isProcessingPayment && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-center gap-3 p-4 bg-blue-50 dark:bg-blue-950 rounded-lg">
+                  <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                  <div className="text-sm">
+                    {!paymentStatus ? (
+                      <span>Initiating payment on terminal...</span>
+                    ) : paymentStatus.square_status === "PENDING" ? (
+                      <span>Waiting for customer on terminal...</span>
+                    ) : paymentStatus.square_status === "IN_PROGRESS" ? (
+                      <span>Processing payment...</span>
+                    ) : (
+                      <span>Finalizing payment...</span>
+                    )}
+                  </div>
+                </div>
+
+                {paymentStatus?.square_status && (
+                  <div className="text-xs text-center text-muted-foreground">
+                    Status: {paymentStatus.square_status}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Payment Success */}
+            {paymentStatus?.status === "completed" && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-center gap-3 p-4 bg-green-50 dark:bg-green-950 rounded-lg">
+                  <CheckCircle2 className="h-5 w-5 text-green-600" />
+                  <div className="text-sm font-medium text-green-600">
+                    Payment completed successfully!
+                  </div>
+                </div>
+
+                {paymentStatus.receipt_url && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => window.open(paymentStatus.receipt_url!, "_blank")}
+                    className="w-full"
+                  >
+                    <ExternalLink className="h-4 w-4 mr-2" />
+                    View Receipt
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {/* Payment Failed */}
+            {(paymentStatus?.status === "failed" || paymentStatus?.status === "cancelled") && (
+              <div className="flex items-center justify-center gap-3 p-4 bg-red-50 dark:bg-red-950 rounded-lg">
+                <XCircle className="h-5 w-5 text-red-600" />
+                <div className="text-sm font-medium text-red-600">
+                  Payment {paymentStatus.status}
+                </div>
+              </div>
+            )}
+
+            {/* No Devices Warning */}
+            {!isProcessingPayment && paymentDevices.length === 0 && (
+              <div className="flex items-center gap-3 p-4 bg-amber-50 dark:bg-amber-950 rounded-lg">
+                <AlertCircle className="h-5 w-5 text-amber-600" />
+                <div className="text-sm text-amber-600">
+                  No payment devices available. Please pair a device first.
+                </div>
+              </div>
+            )}
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={handleCloseCheckoutModal}>
-              Cancel
-            </Button>
-            <Button onClick={handleChargeNow}>
-              Charge Now
-            </Button>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            {paymentStatus?.status === "completed" ? (
+              <Button onClick={handleCloseCheckoutModal} className="w-full">
+                Close
+              </Button>
+            ) : isProcessingPayment ? (
+              <Button variant="outline" onClick={handleCancelPayment} className="w-full">
+                Cancel Payment
+              </Button>
+            ) : (
+              <div className="flex w-full gap-2">
+                <Button variant="outline" onClick={handleCloseCheckoutModal} className="flex-1">
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleInitiatePayment}
+                  disabled={!selectedDeviceId || !order}
+                  className="flex-[2] h-12 text-lg font-semibold"
+                  size="lg"
+                >
+                  Charge Now
+                </Button>
+              </div>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

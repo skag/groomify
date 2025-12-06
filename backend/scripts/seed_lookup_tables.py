@@ -24,11 +24,11 @@ from app.models.business_user import BusinessUserRole, BusinessUserRoleName
 # The database is the real source of truth once seeded
 APPOINTMENT_STATUSES = [
     {"name": "scheduled", "display_text": "Scheduled", "order": 1},
-    {"name": "checked_in", "display_text": "Checked In", "order": 2},
     {"name": "in_progress", "display_text": "In Process", "order": 3},
     {"name": "ready_for_pickup", "display_text": "Ready for Pickup", "order": 4},
     {"name": "cancelled", "display_text": "Cancelled", "order": 99},
     {"name": "no_show", "display_text": "No Show", "order": 98},
+    {"name": "completed", "display_text": "Completed", "order": 100},
 ]
 
 

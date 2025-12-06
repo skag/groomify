@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Groomify is a full-stack application with a FastAPI backend and React + TypeScript frontend. The project uses PostgreSQL for the database, with SQLAlchemy ORM and Alembic for migrations.
 
+Do not provide detail logs of your progress. use 1 line sentence for your progress. No details of your workings is required when you are in edit automatically mode. 
+
 ## Architecture
 
 ### Backend (Python/FastAPI)
@@ -160,3 +162,5 @@ npm run lint
 - Backend API server: port 8000 (default)
 - Frontend dev server: port 5173 (Vite default)
 - PostgreSQL database: port 5432 (standard)
+
+

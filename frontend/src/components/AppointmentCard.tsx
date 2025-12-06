@@ -31,7 +31,6 @@ const getTagColor = (tag: string) => {
 const getStatusColor = (status: AppointmentStatus): string => {
   const colors: Record<string, string> = {
     'scheduled': 'bg-gray-100 text-gray-800 border-gray-300',
-    'checked_in': 'bg-blue-100 text-blue-800 border-blue-300',
     'in_progress': 'bg-yellow-100 text-yellow-800 border-yellow-300',
     'ready_for_pickup': 'bg-green-100 text-green-800 border-green-300',
     'completed': 'bg-emerald-100 text-emerald-800 border-emerald-300',
@@ -44,7 +43,6 @@ const getStatusColor = (status: AppointmentStatus): string => {
 const getStatusLabel = (status: AppointmentStatus): string => {
   const labels: Record<string, string> = {
     'scheduled': 'Scheduled',
-    'checked_in': 'Checked In',
     'in_progress': 'In Progress',
     'ready_for_pickup': 'Ready for Pickup',
     'completed': 'Done',
@@ -66,7 +64,7 @@ const getLeftBorderColor = (status?: AppointmentStatus, isConfirmed?: boolean): 
     return 'border-l-gray-400'
   }
 
-  // All other cases (confirmed scheduled, checked_in, in_progress, etc.) -> green
+  // All other cases (confirmed scheduled, in_progress, etc.) -> green
   return 'border-l-green-500'
 }
 

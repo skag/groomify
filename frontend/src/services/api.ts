@@ -39,8 +39,12 @@ async function apiFetch<T>(
   // Add auth token if required
   if (requiresAuth) {
     const token = localStorage.getItem('access_token');
+    console.log('[API] requiresAuth=true, token:', token ? `${token.substring(0, 20)}...` : 'NULL');
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
+      console.log('[API] Authorization header set');
+    } else {
+      console.warn('[API] No token found in localStorage');
     }
   }
 

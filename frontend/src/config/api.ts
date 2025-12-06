@@ -73,5 +73,18 @@ export const API_CONFIG = {
       update: (id: number) => `/api/time-blocks/${id}`,
       delete: (id: number) => `/api/time-blocks/${id}`,
     },
+    payments: {
+      config: '/api/payments/config',
+      oauthAuthorize: (provider: string) => `/api/payments/oauth/authorize?provider=${provider}`,
+      oauthCallback: (provider: string) => `/api/payments/oauth/callback?provider=${provider}`,
+      disconnect: (provider: string) => `/api/payments/oauth/disconnect?provider=${provider}`,
+      devices: {
+        list: '/api/payments/devices',
+        pair: '/api/payments/devices/pair',
+        pairStatus: '/api/payments/devices/pair/status',
+        unpair: (id: number) => `/api/payments/devices/${id}`,
+        update: (id: number) => `/api/payments/devices/${id}`,
+      },
+    },
   },
 } as const;

@@ -21,6 +21,7 @@ export interface DailyAppointmentItem {
   owner?: string | null;
   service_id?: number | null;
   service?: string | null;
+  service_price?: number | null;
   tags?: string[];
   status?: AppointmentStatus | null;
   is_confirmed?: boolean | null;

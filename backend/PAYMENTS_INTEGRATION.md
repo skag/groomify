@@ -62,12 +62,12 @@ Add to `.env`:
 ```bash
 # Square Configuration
 SQUARE_APP_ID=sandbox-sq0idb-YOUR_APP_ID
-SQUARE_APP_SECRET=sandbox-sq0csb-YOUR_APP_SECRET
+SQUARE_APP_SECRET=
 SQUARE_REDIRECT_URI=http://localhost:8000/api/payments/oauth/callback
 SQUARE_ENVIRONMENT=sandbox  # or "production"
 
 # Encryption Key
-PAYMENT_ENCRYPTION_KEY=your_fernet_key_here
+PAYMENT_ENCRYPTION_KEY=
 ```
 
 Generate encryption key:
